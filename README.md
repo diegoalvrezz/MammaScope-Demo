@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="codigo/logo" width="220">
+</p>
 # MammaScope — Breast Cancer Concordance Analysis Demo
 
 ![Python](https://img.shields.io/badge/Python-3.10-blue)
