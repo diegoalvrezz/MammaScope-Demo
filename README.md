@@ -1,15 +1,14 @@
-# MammaTyper vs IHC Comparison — Breast Cancer Subtyping Tool
+# MammaScope — Breast Cancer Concordance Analysis Demo
 
 ![Python](https://img.shields.io/badge/Python-3.10-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-App-red)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Project](https://img.shields.io/badge/Project-Bachelor%20Thesis-blueviolet)
 
-Public demo of a software tool developed as part of a **Bachelor's Thesis (TFG)** in Health Engineering at the **University of Burgos**.
-
-The application allows automated **comparison between immunohistochemistry (IHC) results and molecular subtyping obtained with MammaTyper®** for breast cancer classification.
+Public demo of **MammaScope**, a Streamlit-based software tool for integrating and comparing immunohistochemistry (IHC) and MammaTyper molecular profiling in breast cancer.
 
 ---
+
 ## System Workflow
 
 The following diagram summarizes the main processing pipeline of the demo application, from file upload to result generation.
@@ -38,6 +37,7 @@ flowchart LR
     H --> I[Interactive visualization<br/>in Streamlit]
     H --> J[Exportable outputs<br/>reports / tables]
 ```
+
 ---
 
 # Live Demo
@@ -49,7 +49,6 @@ https://mammascope-demo.streamlit.app/
 The demo includes **simulated and anonymized example files** so the full workflow can be tested without using real clinical data.
 
 ---
-
 
 # Overview
 
@@ -134,8 +133,17 @@ These files allow users to test the complete workflow without requiring real hos
 TFG_MammaTyper_Demo
 │
 ├── codigo/                 core processing modules
+│
 ├── demo_app/               Streamlit demo application
 │   ├── demo_app.py
+│   ├── ajustes.py
+│   ├── extraccion.py
+│   ├── informes.py
+│   ├── discordancia.py
+│   ├── db.py
+│   ├── auth.py
+│   ├── vista_historico.py
+│   ├── stats_biomarcadores.py
 │   └── demo_files/
 │
 ├── requirements.txt
@@ -151,9 +159,9 @@ This repository **does not contain real clinical data**.
 
 All files included in the demo are:
 
-- simulated
-- anonymized
-- intended only for demonstration purposes
+- simulated  
+- anonymized  
+- intended only for demonstration purposes  
 
 The full application is designed to operate with **previously anonymized data within a hospital environment**.
 
@@ -164,7 +172,7 @@ The full application is designed to operate with **previously anonymized data wi
 **Diego Vallina Álvarez**
 
 Health Engineering Degree  
-University of Burgos
+University of Burgos  
 
 Bachelor’s Thesis developed in collaboration with the **Hospital Universitario de Burgos (HUBU)**.
 
