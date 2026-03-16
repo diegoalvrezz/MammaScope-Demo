@@ -175,9 +175,9 @@ def main() -> None:
     st.markdown('<div class="bloque-demo">', unsafe_allow_html=True)
 
     if logo_path.exists():
-        col1, col2, col3 = st.columns([1.4, 1.2, 1.4])
+        col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            st.image(str(logo_path), use_container_width=True)
+            st.image(str(logo_path), width=500)
 
     st.markdown(
         """
