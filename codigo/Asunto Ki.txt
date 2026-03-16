@@ -1,0 +1,7 @@
+Para la BINARIZACION DEL KI segun IHQ (alto > 20%) necesitamos binariar el resultado de KI de la IHQ para poder comparar con MMT:
+
+Justificación del punto de corte del 20% para la binarización de Ki-67
+En el presente trabajo, el marcador Ki-67 obtenido por inmunohistoquímica (IHQ) se ha binarizado utilizando un punto de corte del 20%, considerando como “alto” aquellos casos con una expresión ≥20% y como “bajo” aquellos <20%.
+La elección de este umbral se basa en los consensos internacionales de St. Gallen y en su uso extendido en la práctica clínica como referencia para diferenciar tumores luminales A-like de luminales B-like. Aunque Ki-67 es un marcador continuo y presenta variabilidad interobservador, el punto de corte del 20% es uno de los más aceptados en la literatura y permite una clasificación reproducible en estudios comparativos.
+Además, dado que el sistema MammaTyper® ya proporciona una categorización binaria validada por el fabricante (Positive/Negative) basada en sus propios puntos de corte moleculares, se consideró metodológicamente más riguroso comparar ambas técnicas en formato binario (alto/bajo) manteniendo el umbral clínicamente más estandarizado en IHQ.
+Esta aproximación permite calcular métricas de concordancia (índice kappa de Cohen, test de McNemar, porcentaje de acuerdo) de forma consistente y clínicamente defendible.

@@ -1,0 +1,152 @@
+{
+  "settings_meta": {
+    "last_modified": "2026-01-08T22:45:27",
+    "modified_by": "usuario",
+    "version": "1.0"
+  },
+  "clinico": {
+    "mmt_ranges": {
+      "ERBB2": {
+        "vmin": 34.0,
+        "vmax": 42.0,
+        "thresholds": [
+          38.3,
+          40.4
+        ],
+        "labels": [
+          {
+            "text": "HER2 zero/ultra low",
+            "pos": 34.799999999999976
+          },
+          {
+            "text": "HER2 Low",
+            "pos": 39.1
+          },
+          {
+            "text": "HER2 Positive",
+            "pos": 41.2
+          }
+        ]
+      },
+      "ESR1": {
+        "vmin": 34.0,
+        "vmax": 42.0,
+        "thresholds": [
+          37.1,
+          38.2
+        ],
+        "labels": [
+          {
+            "text": "ER Negative",
+            "pos": 35.5
+          },
+          {
+            "text": "ER Low Positive",
+            "pos": 37.6
+          },
+          {
+            "text": "ER Positive",
+            "pos": 40.4
+          }
+        ]
+      },
+      "PGR": {
+        "vmin": 34.0,
+        "vmax": 42.0,
+        "thresholds": [
+          35.0,
+          36.3
+        ],
+        "labels": [
+          {
+            "text": "PR Negative",
+            "pos": 34.8
+          },
+          {
+            "text": "PR Positive",
+            "pos": 40.4
+          }
+        ]
+      },
+      "MKI67": {
+        "vmin": 32.0,
+        "vmax": 40.0,
+        "thresholds": [
+          35.1,
+          36.3,
+          37.0,
+          37.7
+        ],
+        "labels": [
+          {
+            "text": "Ki-67 Negative",
+            "pos": 33.2
+          },
+          {
+            "text": "Ki-67 Positive",
+            "pos": 37.2
+          }
+        ]
+      }
+    },
+    "avisos": {
+      "activar": true,
+      "incluir_en_pdf": true,
+      "incluir_en_app": true,
+      "avisar_her2_low_sin_score": true,
+      "avisar_discordancia_er": true,
+      "avisar_discordancia_pr": true,
+      "avisar_discordancia_her2": true,
+      "avisar_discordancia_subtipo": true,
+      "nivel_por_defecto": "WARNING",
+      "texto_cabecera_pdf": "Avisos / Revisión",
+      "texto_cabecera_app": "⚠️ Avisos automáticos del lote",
+      "texto_disclaimer": "Aviso automático: indica discordancias potenciales y requiere revisión por facultativo responsable.",
+      "avisar_proximidad_cutoff": true,
+      "cutoff_prox_critico_ct": 0.2,
+      "cutoff_prox_cercano_ct": 0.5
+    }
+  },
+  "pdf": {
+    "mostrar_mapas_calor": true,
+    "mostrar_barras_ihq": true,
+    "mostrar_comentario_automatico": true,
+    "mostrar_identificacion": true,
+    "mostrar_vista_rapida": true,
+    "mostrar_tabla_genes": true,
+    "mostrar_ihq_her2": true,
+    "mostrar_footer_firmantes": true,
+    "logo_path": "hubu_escudo.png",
+    "titulo_servicio": "SERVICIO DE ANATOMÍA PATOLÓGICA – HUBU",
+    "titulo_informe": "INFORME INTEGRADO IHQ + MammaTyper®",
+    "section_titles": {
+      "identificacion": "Identificación",
+      "vista_rapida": "Vista rápida",
+      "tabla_genes": "MammaTyper® – Biomarcadores qRT-PCR",
+      "mapas_calor": "Mapas de calor (MammaTyper®) – Rojo: Valor. Negro: Límites",
+      "ihq_her2": "IHQ / HER2",
+      "barras_ihq": "IHQ – Distribución porcentual",
+      "comentario": "Comentario automático según la info. de los informes",
+      "resumen_cutoffs": "Resumen MMT (valor, cutoffs y cercanía)",
+      "visual_cutoffs": "Proximidad a cutoffs (Δabs, Ct)"
+    },
+    "max_lines_aviso": 4,
+    "max_lines_comentario": 3,
+    "footer_disclaimer": "Informe generado automáticamente a partir de datos IHQ + MammaTyper®. Validación por facultativo responsable. HER2-low se atribuye al comentario del informe original si el score IHQ no está documentado.",
+    "mostrar_resumen_cutoffs": true,
+    "mostrar_visual_cutoffs": true,
+    "cutoffs_visual_max_delta": 1.0,
+    "cutoff_visual_critico_ct": 0.2,
+    "cutoff_visual_cercano_ct": 0.5,
+    "mostrar_panel_integrado": true
+  },
+  "exportacion": {
+    "zip_nombre_template": "informes_{timestamp}",
+    "timestamp_format": "%Y-%m-%d_%H%M",
+    "incluir_excel_resumen_en_zip": false
+  },
+  "app": {
+    "validacion_estricta": true,
+    "mostrar_columnas_tecnicas": true
+  }
+}
