@@ -12,6 +12,8 @@
 
 Public demo of **MammaScope**, a Streamlit-based software tool for integrating and comparing immunohistochemistry (IHC) and MammaTyper molecular profiling in breast cancer.
 
+
+
 ---
 
 ## System Workflow
@@ -101,7 +103,7 @@ Clone the repository:
 
 ```bash
 git clone https://github.com/diegoalvrezz/MammaScope-Demo.git
-cd TFG_MammaTyper_Demo
+cd MammaScope-Demo
 ```
 
 Install dependencies:
