@@ -134,6 +134,12 @@ def _inject_demo_styles() -> None:
         section[data-testid="stMain"] h1 {
             display: none;
         }
+        .bloque-demo:empty {
+            display: none;
+        }
+        div[data-testid="stMarkdownContainer"] > div.bloque-demo:empty {
+            display: none;
+        }
         </style>
         """,
         unsafe_allow_html=True,
