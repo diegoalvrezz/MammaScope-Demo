@@ -150,7 +150,7 @@ def main() -> None:
         page_icon=str(ROOT / "docs" / "logo.png"),
         layout="wide"
     )
-
+    _ensure_demo_session()
     _inject_demo_styles()
 
     # Permite importar módulos desde la carpeta /codigo
@@ -273,7 +273,7 @@ def main() -> None:
     # Inicio de la aplicación real
     # ---------------------------------------------------------------------
     st.subheader("Inicio de la aplicación")
-    _ensure_demo_session()
+    # _ensure_demo_session()
 
     # Importación tardía tras configurar sys.path y la BD de demo
     import app
