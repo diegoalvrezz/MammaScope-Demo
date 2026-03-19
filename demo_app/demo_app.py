@@ -170,7 +170,7 @@ def main() -> None:
     # ---------------------------------------------------------------------
     # Cabecera visual de la demo
     # ---------------------------------------------------------------------
-    logo_path = ROOT / "codigo" / "logo.png"
+    logo_path = ROOT / "docs" / "logo.png"
 
     st.markdown('<div class="bloque-demo">', unsafe_allow_html=True)
 
