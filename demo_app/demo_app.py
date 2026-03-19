@@ -137,6 +137,11 @@ def _inject_demo_styles() -> None:
         }
         </style>
         """,
+        div[data-testid="stVerticalBlock"] > div:empty {
+            display: none;
+        }
+        </style>
+        """,
         unsafe_allow_html=True,
     )
 
