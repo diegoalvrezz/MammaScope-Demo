@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Bases de datos locales (si se generan al ejecutar la app)
+*.db
