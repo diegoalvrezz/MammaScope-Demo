@@ -8,23 +8,6 @@ from extraccion import extraer_registros_pdf, extraer_registros_patwin
 from ajustes import load_settings
 
 
-
-
-REQUIRED_COLUMNS_EXCEL = [
-    "RONDA",
-    "Sample ID",
-    "Subtype Info MMT",
-    "ERBB2_value",
-    "ERBB2_status",
-    "ESR1_value",
-    "ESR1_status",
-    "PGR_value",
-    "PGR_status",
-    "MKI67_value",
-    "MKI67_status",
-]
-
-
 def validar_excel_patwin(excel_bytes: bytes):
     """
     Valida el Excel de Patwin de forma coherente con el pipeline real.

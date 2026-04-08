@@ -232,22 +232,48 @@ def init_db() -> None:
     conn.close()
 
 
-def insertar_muestra_combinada(muestra: Dict[str, Any]) -> None:
+def muestra_existe(sample_id: str) -> bool:
     """
-    Inserta o actualiza una muestra emparejada (Excel + PDF) en la tabla `muestras`.
+    Comprueba si un sample_id ya existe en la tabla `muestras`.
 
-    Detalles importantes:
-    - Se usa INSERT OR REPLACE para que el `sample_id` (UNIQUE) actúe como “clave natural”.
-      Si entra una muestra ya existente, se reemplaza.
-    - La consulta se construye de forma dinámica (lista de columnas + placeholders),
-      evitando errores típicos por desajuste entre columnas y valores.
+    Se usa antes de insertar para distinguir entre inserción nueva
+    y actualización, permitiendo informar al usuario en el Paso 2.
     """
     init_db()
     conn = get_connection()
     cur = conn.cursor()
+    cur.execute("SELECT 1 FROM muestras WHERE sample_id = ? LIMIT 1;", (sample_id,))
+    existe = cur.fetchone() is not None
+    conn.close()
+    return existe
+
+
+def insertar_muestra_combinada(muestra: Dict[str, Any]) -> str:
+    """
+    Inserta o actualiza una muestra emparejada (Excel + PDF) en la tabla `muestras`.
+
+    Detalles importantes:
+    - Se usa INSERT OR REPLACE para que el `sample_id` (UNIQUE) actúe como "clave natural".
+      Si entra una muestra ya existente, se reemplaza (actualiza).
+    - La consulta se construye de forma dinámica (lista de columnas + placeholders),
+      evitando errores típicos por desajuste entre columnas y valores.
+
+    Retorna
+    -------
+    str
+        - "insert" : muestra nueva, insertada por primera vez.
+        - "update" : muestra ya existente, actualizada con los nuevos datos.
+    """
+    init_db()
+
+    # Detectar si es inserción nueva o actualización antes de ejecutar.
+    sid = muestra.get("sample_id")
+    es_actualizacion = bool(sid and muestra_existe(str(sid)))
+
+    conn = get_connection()
+    cur = conn.cursor()
 
     # Lista explícita de columnas soportadas por la app.
-    # Esto evita que entren claves “extra” desde el diccionario y rompe menos con cambios de esquema.
     cols = [
         # Identificación
         "nhc", "sample_id", "fecha_excel",
@@ -288,11 +314,10 @@ def insertar_muestra_combinada(muestra: Dict[str, Any]) -> None:
         VALUES ({placeholders});
     """
     cur.execute(sql, vals)
-
     conn.commit()
     conn.close()
 
-
+    return "update" if es_actualizacion else "insert"
 def registrar_muestra_sin_match(sample_id: str, origen: str, detalle: Optional[str] = None) -> None:
     """
     Registra un caso sin correspondencia en `muestras_sin_match`.

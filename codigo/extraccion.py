@@ -2,7 +2,7 @@ import re
 from typing import List, Dict, Any, Optional, Tuple
 
 import pandas as pd
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 from discordancia import construir_aviso_rico
 from ajustes import load_settings

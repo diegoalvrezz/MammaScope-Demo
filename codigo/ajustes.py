@@ -8,7 +8,7 @@ from typing import Any, Dict, Tuple
 
 import streamlit as st
 
-from auth import require_role, current_user
+from auth import current_user
 from db import (
     DB_PATH,
     export_db_filtered,
@@ -22,8 +22,6 @@ from db import (
     log_action,
 )
 from sync_pack import import_transfer_zip
-from auth import current_user
-from db import log_action
 
 
 # =========================================================
@@ -33,12 +31,9 @@ BASE_DIR = os.path.dirname(__file__)
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-LOGO_PATH_DEFAULT = os.path.join(ASSETS_DIR, "logo.png")
 
 HISTORY_DIR = os.path.join(BASE_DIR, "settings_history")
 
-
-DB_BACKUP_DIR = os.path.join(BASE_DIR, "db_backups")
 
 
 # =========================================================
@@ -91,6 +86,11 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
                 ],
             },
         },
+        "ki67_cutoff_ihq": 20.0,
+        "pr_bajo_pct": 10.0,
+        "er_bajo_pct": 10.0,
+        "celularidad_minima_pct": 20.0,
+
         "avisos": {
             "activar": True,
             "incluir_en_pdf": False,   
@@ -106,6 +106,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
             "avisar_proximidad_cutoff": True,
             "cutoff_prox_critico_ct": 0.20,
             "cutoff_prox_cercano_ct": 0.50,
+            "cutoff_prox_supercritico_ct": 0.05,
+
+            "avisar_er_low_ihq": True,
+            "avisar_her2_2plus_sin_sish": True,
+            "avisar_her2_3plus_sin_sish": True,
+            "avisar_faltan_datos_clave": True,
 
             "nivel_por_defecto": "WARNING",  # INFO / WARNING / CRITICO
 
@@ -117,7 +123,6 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "pdf": {
 
         "mostrar_mapas_calor": True,
-        "mostrar_barras_ihq": True,
         "mostrar_comentario_automatico": False,  
 
 
@@ -274,6 +279,22 @@ def validate_settings(settings: Dict[str, Any], autocorrect: bool = True) -> Tup
     if "clinico" not in settings or not isinstance(settings.get("clinico"), dict):
         settings["clinico"] = deepcopy(DEFAULT_SETTINGS["clinico"])
 
+    # Umbrales clínicos configurables: ki67, PR bajo, ER bajo.
+    for _key, _default in [
+        ("ki67_cutoff_ihq",        20.0),
+        ("pr_bajo_pct",            10.0),
+        ("er_bajo_pct",            10.0),
+        ("celularidad_minima_pct", 20.0),
+    ]:
+        try:
+            v = float(settings["clinico"].get(_key, _default))
+            if v <= 0 or v >= 100:
+                raise ValueError
+            settings["clinico"][_key] = v
+        except Exception:
+            warnings.append(f"clinico.{_key} inválido. Se restaura default ({_default}).")
+            settings["clinico"][_key] = float(_default)
+
     avisos = settings.get("clinico", {}).get("avisos")
     if not isinstance(avisos, dict):
         settings["clinico"]["avisos"] = deepcopy(DEFAULT_SETTINGS["clinico"]["avisos"])
@@ -298,6 +319,25 @@ def validate_settings(settings: Dict[str, Any], autocorrect: bool = True) -> Tup
     avisos["incluir_en_app"] = bool(avisos.get("incluir_en_app", True))
 
     avisos["avisar_proximidad_cutoff"] = bool(avisos.get("avisar_proximidad_cutoff", True))
+
+    # Flags nuevos: se garantiza que existen con su valor por defecto.
+    for _flag, _default in [
+        ("avisar_er_low_ihq",         True),
+        ("avisar_her2_2plus_sin_sish", True),
+        ("avisar_her2_3plus_sin_sish", True),
+        ("avisar_faltan_datos_clave",  True),
+    ]:
+        avisos[_flag] = bool(avisos.get(_flag, _default))
+
+    # Umbral supercrítico: debe ser menor que el crítico.
+    try:
+        avisos["cutoff_prox_supercritico_ct"] = float(
+            avisos.get("cutoff_prox_supercritico_ct", 0.05)
+        )
+        if avisos["cutoff_prox_supercritico_ct"] <= 0:
+            raise ValueError
+    except Exception:
+        avisos["cutoff_prox_supercritico_ct"] = 0.05
 
     # Validación numérica de los umbrales de proximidad.
     # Se asume que deben ser > 0 (en Ct), y que el crítico debe ser <= cercano.
@@ -399,7 +439,6 @@ def validate_settings(settings: Dict[str, Any], autocorrect: bool = True) -> Tup
     # Switches booleanos esperados en el bloque PDF.
     bool_keys = [
         "mostrar_mapas_calor",
-        "mostrar_barras_ihq",
         "mostrar_comentario_automatico",
         "mostrar_identificacion",
         "mostrar_vista_rapida",
@@ -873,9 +912,70 @@ def mostrar_ajustes():
             st.caption("Resumen rápido de los puntos de corte usados para interpretar CT y clasificar cada gen.")
             render_tabla_cutoffs_mmt(settings["clinico"]["mmt_ranges"])
 
+            # ── Umbrales clínicos ───────────────────────────────────────────────────
+            st.markdown("---")
+            st.subheader("Umbrales clínicos")
+            st.caption(
+                "Valores de corte usados en las reglas de discordancia y en el módulo estadístico. "
+                "Ajústalos según el protocolo del servicio."
+            )
+
+            col_k, col_p, col_e = st.columns(3)
+            with col_k:
+                settings["clinico"]["ki67_cutoff_ihq"] = st.number_input(
+                    "Cutoff Ki-67 IHQ (%)",
+                    value=float(settings["clinico"].get("ki67_cutoff_ihq", 20.0)),
+                    min_value=1.0,
+                    max_value=99.0,
+                    step=1.0,
+                    help=(
+                        "Umbral de Ki-67 por IHQ para clasificar alta/baja proliferación. "
+                        "Usado en el módulo estadístico (Kappa, McNemar) y en las reglas de aviso. "
+                        "Valor habitual: 14% (St. Gallen) o 20% (ASCO/CAP)."
+                    ),
+                )
+            with col_p:
+                settings["clinico"]["pr_bajo_pct"] = st.number_input(
+                    "Umbral PR bajo (%)",
+                    value=float(settings["clinico"].get("pr_bajo_pct", 10.0)),
+                    min_value=1.0,
+                    max_value=50.0,
+                    step=1.0,
+                    help=(
+                        "Porcentaje por debajo del cual PR IHQ positivo se considera 'PR bajo'. "
+                        "Genera aviso específico de interpretación dependiente del contexto."
+                    ),
+                )
+            with col_e:
+                settings["clinico"]["er_bajo_pct"] = st.number_input(
+                    "Umbral ER bajo (%)",
+                    value=float(settings["clinico"].get("er_bajo_pct", 10.0)),
+                    min_value=1.0,
+                    max_value=50.0,
+                    step=1.0,
+                    help=(
+                        "Porcentaje por debajo del cual ER IHQ positivo se considera 'ER low positive'. "
+                        "Genera aviso específico de zona gris interpretativa."
+                    ),
+                )
+
+            settings["clinico"]["celularidad_minima_pct"] = st.number_input(
+                "Celularidad tumoral mínima recomendada (%)",
+                value=float(settings["clinico"].get("celularidad_minima_pct", 20.0)),
+                min_value=1.0,
+                max_value=80.0,
+                step=5.0,
+                help=(
+                    "Si la celularidad tumoral de la muestra está por debajo de este umbral, "
+                    "se genera un aviso indicando que los resultados IHQ y MMT pueden ser "
+                    "menos representativos. Valor habitual en la práctica: 20-30%."
+                ),
+            )
+
             # Configuración detallada de rangos y umbrales del mapa de calor.
             # Estos parámetros afectan tanto a la visualización como, en algunos casos,
             # a la interpretación cuando se señalan proximidades a umbrales.
+            st.markdown("---")
             st.subheader("Rangos y umbrales MammaTyper® (mapas de calor)")
             st.caption("Ajusta la escala del mapa de calor (vmin/vmax), umbrales y etiquetas de zonas para cada gen.")
 
@@ -972,25 +1072,91 @@ def mostrar_ajustes():
                 help="Añade avisos al PDF si el diseño lo permite sin desbordes.",
             )
 
-            # Límite de avisos para controlar legibilidad.
-            # En PDF es especialmente importante para evitar desbordes de maquetación.
-            avisos["max_avisos_app"] = st.number_input(
-                "Máximo de avisos a mostrar en la aplicación (por muestra)",
-                value=int(avisos.get("max_avisos_app", 3)),
-                min_value=0,
-                max_value=50,
-                step=1,
-                help="Limita la cantidad de avisos visibles por muestra para evitar saturación.",
+
+            st.markdown("---")
+            st.caption("Reglas específicas de aviso (activa o desactiva cada tipo individualmente).")
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                avisos["avisar_discordancia_er"] = st.checkbox(
+                    "Discordancia ER (IHQ vs MMT)",
+                    value=bool(avisos.get("avisar_discordancia_er", True)),
+                    help="Avisa cuando el estado ER difiere entre IHQ y MammaTyper®.",
+                )
+                avisos["avisar_discordancia_pr"] = st.checkbox(
+                    "Discordancia PR (IHQ vs MMT)",
+                    value=bool(avisos.get("avisar_discordancia_pr", True)),
+                    help="Avisa cuando el estado PR difiere entre IHQ y MammaTyper®.",
+                )
+                avisos["avisar_discordancia_her2"] = st.checkbox(
+                    "Discordancia HER2 (IHQ/SISH vs MMT)",
+                    value=bool(avisos.get("avisar_discordancia_her2", True)),
+                    help="Avisa cuando el estado HER2 difiere entre IHQ/SISH y MammaTyper®.",
+                )
+                avisos["avisar_discordancia_subtipo"] = st.checkbox(
+                    "Discordancia de subtipo (IHQ vs MMT)",
+                    value=bool(avisos.get("avisar_discordancia_subtipo", True)),
+                    help="Avisa cuando el subtipo molecular difiere entre IHQ y MammaTyper®.",
+                )
+
+            with col_b:
+                avisos["avisar_her2_low_sin_score"] = st.checkbox(
+                    "HER2-low sin score IHQ documentado",
+                    value=bool(avisos.get("avisar_her2_low_sin_score", True)),
+                    help="Avisa cuando HER2-low se clasifica solo por texto, sin score IHQ.",
+                )
+                avisos["avisar_er_low_ihq"] = st.checkbox(
+                    "ER bajo positivo por IHQ (< 10%)",
+                    value=bool(avisos.get("avisar_er_low_ihq", True)),
+                    help="Avisa cuando ER IHQ es positivo pero con porcentaje bajo (zona 'low positive').",
+                )
+                avisos["avisar_her2_2plus_sin_sish"] = st.checkbox(
+                    "HER2 IHQ 2+ sin SISH",
+                    value=bool(avisos.get("avisar_her2_2plus_sin_sish", True)),
+                    help="Avisa cuando HER2 score 2+ (equívoco) no tiene SISH/ISH registrado.",
+                )
+                avisos["avisar_her2_3plus_sin_sish"] = st.checkbox(
+                    "HER2 IHQ 3+ sin SISH registrado",
+                    value=bool(avisos.get("avisar_her2_3plus_sin_sish", True)),
+                    help="Avisa cuando HER2 score 3+ no tiene SISH registrado en el volcado.",
+                )
+
+            avisos["avisar_faltan_datos_clave"] = st.checkbox(
+                "Datos clave incompletos",
+                value=bool(avisos.get("avisar_faltan_datos_clave", True)),
+                help="Avisa cuando faltan demasiados campos clave para una interpretación fiable.",
             )
-            avisos["max_avisos_pdf"] = st.number_input(
-                "Máximo de avisos a incluir en el PDF (por muestra)",
-                value=int(avisos.get("max_avisos_pdf", 2)),
-                min_value=0,
-                max_value=50,
-                step=1,
-                help="Limita avisos en PDF para mantener el informe compacto y legible.",
+            avisos["avisar_proximidad_cutoff"] = st.checkbox(
+                "Proximidad a punto de corte (MMT)",
+                value=bool(avisos.get("avisar_proximidad_cutoff", True)),
+                help="Avisa cuando el valor MMT está cerca del umbral de clasificación.",
             )
 
+            st.markdown("**Umbrales de proximidad a cutoff (Ct)**")
+            col_c, col_d, col_e = st.columns(3)
+            with col_c:
+                avisos["cutoff_prox_critico_ct"] = st.number_input(
+                    "Crítico (Ct)",
+                    value=float(avisos.get("cutoff_prox_critico_ct", 0.20)),
+                    min_value=0.01, max_value=1.0, step=0.01,
+                    help="Distancia al cutoff por debajo de la cual se genera aviso crítico.",
+                )
+            with col_d:
+                avisos["cutoff_prox_cercano_ct"] = st.number_input(
+                    "Cercano (Ct)",
+                    value=float(avisos.get("cutoff_prox_cercano_ct", 0.50)),
+                    min_value=0.01, max_value=2.0, step=0.01,
+                    help="Distancia al cutoff por debajo de la cual se genera aviso de proximidad.",
+                )
+            with col_e:
+                avisos["cutoff_prox_supercritico_ct"] = st.number_input(
+                    "Supercrítico (Ct)",
+                    value=float(avisos.get("cutoff_prox_supercritico_ct", 0.05)),
+                    min_value=0.01, max_value=0.5, step=0.01,
+                    help="Umbral interno para avisos sin contexto clínico previo (muy estricto).",
+                )
+
+            st.markdown("---")
             # Texto estándar que acompaña a los avisos para dejar clara su naturaleza de ayuda a revisión.
             avisos["texto_disclaimer"] = st.text_area(
                 "Texto estándar del aviso (disclaimer)",
@@ -1112,11 +1278,6 @@ def mostrar_ajustes():
                     value=bool(pdf.get("mostrar_mapas_calor", True)),
                     help="Genera mapas de calor por biomarcador para visualizar rangos y umbrales.",
                 )
-                pdf["mostrar_barras_ihq"] = st.checkbox(
-                    "Barras de IHQ",
-                    value=bool(pdf.get("mostrar_barras_ihq", True)),
-                    help="Incluye barras/gráficas relacionadas con IHQ (si aplica en tu plantilla).",
-                )
 
             with colC:
                 pdf["mostrar_ihq_her2"] = st.checkbox(
@@ -1196,11 +1357,10 @@ def mostrar_ajustes():
                 )
 
             # Texto fijo de pie de informe para aclaraciones de uso y responsabilidades.
-            # Nota: aquí hay un detalle importante de nomenclatura: la clave correcta suele ser `footer_disclaimer`.
-            # Si se escribe en otra clave, no se reflejará en el generador de PDF.
+            # La clave debe ser footer_disclaimer para que el generador de PDFs la lea correctamente.
             with col2:
-                pdf["Nota aclaratoria (pie del informe)"] = st.text_area(
-                    "Disclaimer del pie",
+                pdf["footer_disclaimer"] = st.text_area(
+                    "Nota aclaratoria (pie del informe)",
                     value=str(pdf.get("footer_disclaimer", "")),
                     height=120,
                     help="Texto de precaución/uso clínico/interpretación que aparecerá al final del PDF.",
@@ -1272,24 +1432,23 @@ def mostrar_ajustes():
 
             exp = settings["exportacion"]
 
-            # Controla qué secciones analíticas se incluyen en el Excel final.
-            # Esto permite ajustar el nivel de detalle según el destinatario (laboratorio, informe interno, anexos TFG).
             st.subheader("Exportación de resultados")
-            st.caption("Controla qué bloques se incluyen en el Excel final de salida.")
-            exp["incluir_resumen_lote"] = st.checkbox(
-                "Incluir resumen del lote en el Excel de salida",
-                value=bool(exp.get("incluir_resumen_lote", True)),
-                help="Añade un resumen del lote procesado (conteos, concordancias, etc.).",
+            st.caption("Configuración del formato de los archivos generados al exportar lotes.")
+
+            exp["zip_nombre_template"] = st.text_input(
+                "Plantilla de nombre del ZIP",
+                value=str(exp.get("zip_nombre_template", "informes_{timestamp}")),
+                help="Nombre base del ZIP de exportación. {timestamp} se reemplaza automáticamente.",
             )
-            exp["incluir_estadisticas_biomarcadores"] = st.checkbox(
-                "Incluir estadísticas por biomarcador",
-                value=bool(exp.get("incluir_estadisticas_biomarcadores", True)),
-                help="Incluye métricas por biomarcador (TP/TN/FP/FN, kappa, McNemar, etc. si están activas).",
+            exp["timestamp_format"] = st.text_input(
+                "Formato del timestamp",
+                value=str(exp.get("timestamp_format", "%Y-%m-%d_%H%M")),
+                help="Formato strftime para el timestamp del nombre del ZIP (ej: %Y-%m-%d_%H%M).",
             )
-            exp["incluir_global_acumulado"] = st.checkbox(
-                "Incluir estadísticas globales acumuladas",
-                value=bool(exp.get("incluir_global_acumulado", True)),
-                help="Incluye métricas acumuladas históricas (útil para sesgos y seguimiento longitudinal).",
+            exp["incluir_excel_resumen_en_zip"] = st.checkbox(
+                "Incluir Excel de resumen en el ZIP de exportación",
+                value=bool(exp.get("incluir_excel_resumen_en_zip", False)),
+                help="Si está activo, el ZIP de exportación incluirá un Excel con el resumen del lote.",
             )
 
             if rol == "admin":
@@ -1315,21 +1474,24 @@ def mostrar_ajustes():
 
             app = settings["app"]
 
-            # Opciones operativas generales.
-            # Estas opciones se orientan a:
-            # - depuración en fase de pruebas
-            # - reducción de errores humanos con confirmaciones adicionales
             st.subheader("Comportamiento de la aplicación")
-            st.caption("Opciones de depuración y seguridad operativa.")
-            app["mostrar_debug"] = st.checkbox(
-                "Mostrar información de depuración",
-                value=bool(app.get("mostrar_debug", False)),
-                help="Muestra información adicional para diagnóstico (recomendado solo en pruebas).",
+            st.caption("Opciones generales de funcionamiento y validación.")
+
+            app["validacion_estricta"] = st.checkbox(
+                "Validación estricta de archivos",
+                value=bool(app.get("validacion_estricta", True)),
+                help=(
+                    "Si está activo, además de extraer registros, se exige que al menos el 70% "
+                    "tengan Sample ID válido. Recomendado en producción."
+                ),
             )
-            app["confirmaciones_extra"] = st.checkbox(
-                "Pedir confirmaciones extra en acciones sensibles",
-                value=bool(app.get("confirmaciones_extra", True)),
-                help="Añade confirmaciones antes de acciones que pueden sobrescribir o borrar información.",
+            app["mostrar_columnas_tecnicas"] = st.checkbox(
+                "Mostrar columnas técnicas en vistas de datos",
+                value=bool(app.get("mostrar_columnas_tecnicas", True)),
+                help=(
+                    "Muestra columnas derivadas (cutoff_nearest, delta_cutoff, equiv, etc.) "
+                    "en las tablas del histórico. Desactivar para una vista más limpia."
+                ),
             )
 
             if rol == "admin":

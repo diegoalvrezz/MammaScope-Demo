@@ -211,11 +211,7 @@ def _colormap_mammatyper(t: float):
             tt = (t - t0) / (t1 - t0) if t1 != t0 else 0.0
             r = _lerp(c0[0], c1[0], tt)
 
-            # IMPORTANTE:
-            # En tu versión original había un detalle:
-            #   g = _lerp(c0[1], c1[0], tt)
-            # Eso mezcla el canal G con el canal R del siguiente stop.
-            # Aquí lo dejo corregido para que interpolen canales homólogos.
+            # Interpolación correcta: cada canal (R, G, B) se mezcla con su homólogo.
             g = _lerp(c0[1], c1[1], tt)
 
             b = _lerp(c0[2], c1[2], tt)
@@ -237,15 +233,31 @@ def _x_from_value(x0: float, w: float, v: float, vmin: float, vmax: float) -> fl
 def _draw_gradient_bar(c: canvas.Canvas, x0: float, y0: float, w: float, h: float, vmin: float, vmax: float):
     """
     Dibuja una barra horizontal con gradiente (por rectángulos finos).
+    Usa saveState/restoreState con clip path para que los rectángulos del
+    gradiente nunca sobresalgan del borde exterior de la barra.
     """
+    from reportlab.lib.utils import simpleSplit
+    from reportlab.graphics.shapes import Rect
+    from reportlab.pdfgen.pathobject import PDFPathObject
+
+    c.saveState()
+
+    # Clip path: restringe el pintado al rectángulo exacto de la barra
+    p = c.beginPath()
+    p.rect(x0, y0, w, h)
+    c.clipPath(p, stroke=0, fill=0)
+
     steps = 220
     for i in range(steps):
         t = i / (steps - 1)
         c.setFillColor(_colormap_mammatyper(t))
         c.rect(x0 + w * t, y0, w / steps + 0.5, h, stroke=0, fill=1)
 
-    # borde exterior
-    c.setStrokeColor(colors.black)
+    c.restoreState()
+
+    # Borde exterior (fuera del clip, para que se pinte limpio encima)
+    c.setStrokeColor(colors.Color(0.3, 0.3, 0.3))
+    c.setLineWidth(0.7)
     c.rect(x0, y0, w, h, stroke=1, fill=0)
 
 
@@ -325,32 +337,69 @@ def _draw_thresholds(
     thresholds: list[float],
 ):
     """
-    Dibuja líneas verticales (negras) en la barra para thresholds.
-    También coloca una etiqueta con el valor numérico del threshold.
+    Dibuja líneas de corte en la barra + etiquetas numéricas.
+
+    Estrategia de posicionamiento:
+    - Línea vertical blanca semitransparente DENTRO de la barra.
+    - Etiqueta encima del borde superior de la barra, con pastilla
+      blanca opaca para que no tape los ticks del eje ni el texto
+      de zona ("HER2 Low", etc.) que está dentro del gradiente.
+    - Las etiquetas se desplazan alternando arriba/abajo cuando hay
+      dos umbrales muy juntos para evitar solapamiento entre ellas.
     """
     c.saveState()
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(1.4)
 
-    for th in thresholds:
-        x = _x_from_value(x0, w, th, vmin, vmax)
+    FONT_TH = 5.6
+    PAD_X   = 2.0
+    PAD_Y   = 1.2
+
+    # Precalcular posiciones X de todos los umbrales
+    positions = [_x_from_value(x0, w, th, vmin, vmax) for th in thresholds]
+
+    for i, (th, x) in enumerate(zip(thresholds, positions)):
+        # ── Línea vertical blanca dentro de la barra ──
+        c.setStrokeColor(colors.Color(1, 1, 1, 0.85))
+        c.setLineWidth(1.5)
         c.line(x, y0, x, y0 + h)
 
+        # ── Etiqueta encima de la barra ──
         label = f"{th:.1f}"
-        tag_y = y0 - 16
-        if tag_y < 6:
-            tag_y = y0 + h + 4
+        c.setFont("Helvetica-Bold", FONT_TH)
+        lbl_w = c.stringWidth(label, "Helvetica-Bold", FONT_TH)
+        box_w = lbl_w + PAD_X * 2
+        box_h = FONT_TH + PAD_Y * 2
 
-        est_w = c.stringWidth(label, "Helvetica-Bold", 7.0) + 8
-        tag_x = x - est_w / 2
+        lx = x - box_w / 2
+        if lx < x0:
+            lx = x0
+        if lx + box_w > x0 + w:
+            lx = x0 + w - box_w
 
-        # evitar que la etiqueta se salga de la barra
-        if tag_x < x0:
-            tag_x = x0
-        if tag_x + est_w > x0 + w:
-            tag_x = x0 + w - est_w
+        # Nivel vertical: alterna entre base y alto para umbrales muy juntos.
+        BASE_LY = y0 + h + 1
+        HIGH_LY = y0 + h + box_h + 4
+        ly = HIGH_LY if (i % 2 == 1) else BASE_LY
 
-        _draw_tag(c, tag_x, tag_y, label, font_size=7.0)
+        # Offset horizontal: si solapamos con la pastilla anterior, nos desplazamos.
+        if i > 0:
+            prev_x   = positions[i - 1]
+            prev_lx  = prev_x - box_w / 2
+            prev_lx  = max(prev_lx, x0)
+            gap_px   = lx - (prev_lx + box_w)
+            if gap_px < 1:
+                lx = prev_lx + box_w + 1
+
+        # Volver a contener dentro de la barra tras posible desplazamiento
+        if lx + box_w > x0 + w:
+            lx = x0 + w - box_w
+
+        c.setFillColor(colors.Color(1, 1, 1, 0.95))
+        c.roundRect(lx, ly, box_w, box_h, 1.5, stroke=0, fill=1)
+        c.setStrokeColor(colors.Color(0.3, 0.3, 0.3))
+        c.setLineWidth(0.4)
+        c.roundRect(lx, ly, box_w, box_h, 1.5, stroke=1, fill=0)
+        c.setFillColor(colors.Color(0.10, 0.10, 0.10))
+        c.drawString(lx + PAD_X, ly + PAD_Y, label)
 
     c.restoreState()
 
@@ -367,12 +416,64 @@ def _draw_value_marker(
 ):
     """
     Dibuja el marcador rojo (valor medido) como una línea vertical.
+
+    Si el valor está FUERA del rango [vmin, vmax], se dibuja una flecha
+    en el borde correspondiente apuntando hacia el exterior, con una
+    pequeña etiqueta mostrando el valor real. Esto evita confusión cuando
+    el marcador aparecería en el borde sin explicación.
     """
-    x = _x_from_value(x0, w, value, vmin, vmax)
     c.saveState()
-    c.setStrokeColor(colors.red)
-    c.setLineWidth(2.8)
-    c.line(x, y0 - 2, x, y0 + h + 2)
+    c.setStrokeColor(colors.Color(0.80, 0.05, 0.05))
+    c.setFillColor(colors.Color(0.80, 0.05, 0.05))
+
+    FUERA_IZQ = value < vmin
+    FUERA_DER = value > vmax
+
+    if FUERA_IZQ or FUERA_DER:
+        # Borde donde se dibuja la flecha
+        bx = x0 if FUERA_IZQ else x0 + w
+        arrow_size = 5
+
+        # Línea vertical en el borde
+        c.setLineWidth(2.0)
+        c.line(bx, y0, bx, y0 + h)
+
+        # Triángulo (flecha) apuntando hacia el exterior
+        c.setLineWidth(0.5)
+        if FUERA_IZQ:
+            # Flecha apunta a la izquierda
+            pts = [bx, y0 + h/2,
+                   bx - arrow_size, y0 + h/2 - arrow_size/2,
+                   bx - arrow_size, y0 + h/2 + arrow_size/2]
+        else:
+            # Flecha apunta a la derecha
+            pts = [bx, y0 + h/2,
+                   bx + arrow_size, y0 + h/2 - arrow_size/2,
+                   bx + arrow_size, y0 + h/2 + arrow_size/2]
+
+        p = c.beginPath()
+        p.moveTo(pts[0], pts[1])
+        p.lineTo(pts[2], pts[3])
+        p.lineTo(pts[4], pts[5])
+        p.close()
+        c.drawPath(p, stroke=0, fill=1)
+
+        # Etiqueta con el valor real fuera de escala
+        val_lbl = f"{value:.1f}"
+        c.setFont("Helvetica-Bold", 5.5)
+        lbl_w = c.stringWidth(val_lbl, "Helvetica-Bold", 5.5)
+        if FUERA_IZQ:
+            lx = bx - arrow_size - lbl_w - 2
+        else:
+            lx = bx + arrow_size + 2
+        c.drawString(lx, y0 + h/2 - 2.5, val_lbl)
+
+    else:
+        # Valor dentro del rango: línea vertical normal
+        x = _x_from_value(x0, w, value, vmin, vmax)
+        c.setLineWidth(2.8)
+        c.line(x, y0 - 2, x, y0 + h + 2)
+
     c.restoreState()
 
 
@@ -401,62 +502,91 @@ def _draw_mmt_bar(
     """
     c.saveState()
 
-    bar_h = 14
-    gap_after = 16
+    bar_h     = 14    # altura de la barra de gradiente
+    tick_zone = 22    # zona para ticks encima de la barra
+    gap_after = 16    # gap fijo debajo de la barra (incluye zona Valor/Estado)
 
-    # Conversión segura del valor
     try:
         value = float(value_raw)
     except Exception:
         value = None
 
-    # Título
-    c.setFont("Helvetica-Bold", 8)
+    status_txt  = _fmt(status, "NC")
+    is_positive = "pos" in status_txt.lower()
+    is_negative = "neg" in status_txt.lower()
+    val_str     = f"{value:.2f}" if value is not None else "—"
+    right_x     = x0 + w
+
+    # ── Línea de cabecera: título (izq) + Valor/Estado (der) ──
+    # Se dibuja UNA sola línea con título a la izquierda y Valor/Estado a la derecha,
+    # separados por un margen mínimo. El título se trunca si no cabe.
+    fn_title  = "Helvetica-Bold"
+    fs_title  = 7.5
+    fn_val    = "Helvetica-Bold"
+    fs_val    = 6.8
+
+    if is_positive:
+        col_status = colors.Color(0.70, 0.08, 0.08)
+    elif is_negative:
+        col_status = colors.Color(0.10, 0.40, 0.10)
+    else:
+        col_status = colors.Color(0.45, 0.45, 0.45)
+
+    # Calcular ancho del bloque Valor/Estado
+    prefix_str = f"Valor: {val_str}   Estado: "
+    c.setFont(fn_val, fs_val)
+    status_w = c.stringWidth(status_txt, fn_val, fs_val)
+    prefix_w = c.stringWidth(prefix_str, fn_val, fs_val)
+    val_block_w = prefix_w + status_w + 4
+
+    # Ancho máximo disponible para el título
+    max_title_w = w - val_block_w - 12
+
+    # Dibujar título (truncado si necesario)
+    c.setFont(fn_title, fs_title)
+    c.setFillColor(colors.Color(0.20, 0.20, 0.20))
+    title_w = c.stringWidth(title, fn_title, fs_title)
+    if title_w > max_title_w:
+        # Truncar carácter a carácter
+        t = title
+        while c.stringWidth(t + "…", fn_title, fs_title) > max_title_w and len(t) > 0:
+            t = t[:-1]
+        c.drawString(x0, y_top, t + "…")
+    else:
+        c.drawString(x0, y_top, title)
+
+    # Dibujar Valor/Estado alineado a la derecha en la misma línea
+    c.setFont(fn_val, fs_val)
     c.setFillColor(colors.black)
-    c.drawString(x0, y_top + 2, title)
+    c.drawRightString(right_x - status_w - 2, y_top, prefix_str)
+    c.setFillColor(col_status)
+    c.drawRightString(right_x, y_top, status_txt)
 
-    # Coordenadas internas: se separa el título de ticks/barra para evitar solapes
-    ticks_y = y_top - 18
-    bar_y0 = ticks_y - 22
+    # ── Posiciones ──
+    ticks_y = y_top - 11
+    bar_y0  = ticks_y - tick_zone
 
-    _draw_ticks(c, x0, ticks_y, w, vmin, vmax, major_step=0.5, minor_step=0.2, font_size=6.3)
+    # ── Escala numérica ──
+    _draw_ticks(c, x0, ticks_y, w, vmin, vmax,
+                major_step=1.0, minor_step=0.5, font_size=5.8)
+
+    # ── Gradiente ──
     _draw_gradient_bar(c, x0, bar_y0, w, bar_h, vmin, vmax)
 
-    # Labels sobre la barra (texto blanco dentro del gradiente)
-    c.setFont("Helvetica-Bold", 9)
+    # ── Etiquetas de zona dentro de la barra ──
+    c.setFont("Helvetica-Bold", 7.5)
     c.setFillColor(colors.white)
     for txt, pos_value in labels:
         cx = _x_from_value(x0, w, pos_value, vmin, vmax)
         c.drawCentredString(cx, bar_y0 + 4, txt)
 
-    # Thresholds (negro)
+    # ── Líneas de threshold ──
     if thresholds:
         _draw_thresholds(c, x0, bar_y0, w, bar_h, vmin, vmax, thresholds)
 
-    # Valor (rojo) + texto inferior
+    # ── Marcador del valor (rojo) ──
     if value is not None:
         _draw_value_marker(c, x0, bar_y0, w, bar_h, vmin, vmax, value)
-
-        y_txt = bar_y0 - 6
-        right_x = x0 + w
-
-        status_txt = _fmt(status, "NC")
-        is_positive = "pos" in status_txt.lower()
-
-        left_text = f"Valor: {value:.2f}   Estado:"
-        font_name = "Helvetica-Bold"
-        font_size = 7.2
-
-        c.setFont(font_name, font_size)
-        status_w = c.stringWidth(status_txt, font_name, font_size)
-
-        # “Valor: xx.xx  Estado:” alineado a la derecha dejando hueco para el estado
-        c.setFillColor(colors.black)
-        c.drawRightString(right_x - status_w - 2, y_txt, left_text)
-
-        # Estado coloreado si es positivo
-        c.setFillColor(colors.red if is_positive else colors.black)
-        c.drawRightString(right_x, y_txt, status_txt)
 
     c.restoreState()
     return bar_y0 - gap_after
@@ -598,6 +728,7 @@ def _draw_panel_resumen_integrado(
     w: float,
     muestra: Mapping[str, Any],
     settings_mmt: dict,
+    mostrar_cutoffs: bool = True,
 ) -> float:
     """
     Panel único: resume IHQ (HR/HER2/Ki67) a la izquierda y una tabla de genes a la derecha.
@@ -606,27 +737,40 @@ def _draw_panel_resumen_integrado(
       - Gen
       - Valor (Ct)
       - Estado (Positive/Negative/NC)
-      - Cutoff más cercano (a partir de thresholds en settings)
-      - Δabs (|valor - cutoff|)
-      - Equiv (m.get("{GEN}_equiv") si existe)
+      - Cutoff más cercano, Δabs y Equiv (solo si mostrar_cutoffs=True)
+        Controlado desde ajustes → PDF → "Mostrar resumen de puntos de corte".
 
     Retorna:
       - y_top actualizado para continuar dibujando debajo del panel.
     """
     genes = ["ERBB2", "ESR1", "PGR", "MKI67"]
 
-    title_h = 14
+    title_h = 20   # más espacio para el título
     header_h = 12
     row_h = 12
     box_h = title_h + header_h + len(genes) * row_h + 16
 
-    # Borde rojo grueso porque el panel se apoya fuertemente en MMT/cutoffs
-    _box_stroked(c, x, y_top, w, box_h, radius=8, stroke_color=BORDER_PDF, stroke_width=BORDER_W_THICK)
+    # Borde azul oscuro para el panel integrado (neutro, clínico)
+    _box_stroked(c, x, y_top, w, box_h, radius=6,
+                 stroke_color=IHC_POSITIVE_BLUE, stroke_width=BORDER_W_THICK)
+
+    # Franja de título con fondo azul muy suave
+    c.saveState()
+    c.setFillColor(colors.Color(0.92, 0.95, 1.0))
+    c.roundRect(x, y_top - title_h, w, title_h, 6, stroke=0, fill=1)
+    c.restoreState()
 
     # Título panel
     c.setFont("Helvetica-Bold", 8.4)
-    c.setFillColor(colors.black)
-    c.drawString(x + 10, y_top - 14, "Resumen integrado (IHQ + MMT qRT-PCR + cutoffs)")
+    c.setFillColor(IHC_POSITIVE_BLUE)
+    c.drawString(x + 10, y_top - 14, "Resumen integrado  ·  IHQ + MMT qRT-PCR + Cutoffs")
+
+    # Línea separadora bajo el título
+    c.saveState()
+    c.setStrokeColor(colors.Color(0.75, 0.82, 0.95))
+    c.setLineWidth(0.6)
+    c.line(x + 6, y_top - title_h, x + w - 6, y_top - title_h)
+    c.restoreState()
 
     # Resumen IHQ (izquierda)
     hr = _clasificar_hr(muestra)
@@ -655,9 +799,10 @@ def _draw_panel_resumen_integrado(
     c.drawString(col_gen, y, "Gen")
     c.drawString(col_val, y, "Valor")
     c.drawString(col_stat, y, "Estado")
-    c.drawString(col_cut, y, "Cutoff")
-    c.drawString(col_delta, y, "Δabs")
-    c.drawString(col_eq, y, "Equiv")
+    if mostrar_cutoffs:
+        c.drawString(col_cut, y, "Cutoff")
+        c.drawString(col_delta, y, "Δabs")
+        c.drawString(col_eq, y, "Equiv")
 
     y -= 10
     c.setFont("Helvetica", 7.2)
@@ -682,9 +827,10 @@ def _draw_panel_resumen_integrado(
         c.drawString(col_gen, y, g)
         c.drawRightString(col_val + 35, y, f"{v:.2f}" if v is not None else "—")
         c.drawString(col_stat, y, stt)
-        c.drawRightString(col_cut + 45, y, f"{cutoff:.2f}" if cutoff is not None else "—")
-        c.drawRightString(col_delta + 32, y, f"{delta:.2f}" if delta is not None else "—")
-        c.drawString(col_eq, y, eq)
+        if mostrar_cutoffs:
+            c.drawRightString(col_cut + 45, y, f"{cutoff:.2f}" if cutoff is not None else "—")
+            c.drawRightString(col_delta + 32, y, f"{delta:.2f}" if delta is not None else "—")
+            c.drawString(col_eq, y, eq)
 
         y -= row_h
 
@@ -848,7 +994,8 @@ def _draw_aviso_box(
     body_h = max_lines * line_h + 6
     box_h = title_h + body_h + 10
 
-    _box_stroked(c, x, y_top, w, box_h, radius=8, stroke_color=BORDER_GEN, stroke_width=BORDER_W_THIN)
+    _box_stroked(c, x, y_top, w, box_h, radius=6,
+                 stroke_color=colors.Color(0.85, 0.45, 0.05), stroke_width=BORDER_W_THICK)
 
     c.setFont("Helvetica-Bold", font_small)
     c.setFillColor(colors.black)
@@ -868,6 +1015,154 @@ def _draw_aviso_box(
     )
 
     return y_top - (box_h + 12)
+
+
+# =============================================================================
+# TABLA IHQ DETALLADA (rellena el espacio libre con datos clínicos completos)
+# =============================================================================
+
+def _draw_ihq_detalle(
+    c: canvas.Canvas,
+    x: float,
+    y_top: float,
+    w: float,
+    muestra: Mapping[str, Any],
+    min_y: float,
+    font_small: float,
+    font_body: float,
+) -> float:
+    """
+    Dibuja una tabla compacta con los valores IHQ brutos si hay espacio disponible.
+
+    Muestra: ER%, PR%, Ki-67 IHQ, Score HER2, SISH, P53, CK19, subtipo IHQ y MMT.
+
+    El informe ya contiene HR/HER2/Ki67 resumidos en el panel integrado, pero esta
+    sección aporta los valores numéricos exactos que el facultativo necesita para
+    contrastar con los resultados MMT, haciendo el informe autocontenido.
+
+    Solo se dibuja si caben al menos 60 pts antes del pie de página.
+    """
+    # Recoger campos IHQ
+    # Usar _to_float() para todas las conversiones numéricas: evita ValueError
+    # cuando el valor existe en BD pero es NaN (float) en lugar de None.
+    def _pct_str(val) -> str:
+        """Convierte un valor a string de porcentaje de forma segura."""
+        v = _to_float(val)
+        return f"{int(round(v))}%" if v is not None else ""
+
+    fields = [
+        ("ER (IHQ)",    _fmt(muestra.get("ESR1_IHQ"), "NC"),
+                        _pct_str(muestra.get("ESR1_IHQ_pct"))),
+        ("PR (IHQ)",    _fmt(muestra.get("PGR_IHQ"), "NC"),
+                        _pct_str(muestra.get("PGR_IHQ_pct"))),
+        ("Ki-67 (IHQ)", _pct_str(muestra.get("KI67_IHQ")) or "NC", ""),
+        ("HER2 score",  _fmt(muestra.get("HER2_IHQ_score"), "NC"),
+                        _fmt(muestra.get("HER2_SISH_result"), "")),
+        ("P53 (IHQ)",   _fmt(muestra.get("P53_IHQ_status"), "NC"),
+                        _pct_str(muestra.get("P53_IHQ_pct"))),
+        ("CK19 (IHQ)",  _fmt(muestra.get("CK19_IHQ_status"), "NC"), ""),
+        ("Subtipo IHQ", _fmt(muestra.get("subtipo_ihq"), "NC"), ""),
+        ("Subtipo MMT", _fmt(muestra.get("subtipo_mmt"), "NC"),
+                        _fmt(muestra.get("subtipo_mmt_detalle"), "")),
+    ]
+
+    # Sólo mostrar si hay al menos 1 campo útil (distinto de NC/vacío)
+    has_data = any(
+        v not in ("NC", "No consta", "", "No disponible")
+        for _, v, _ in fields
+    )
+    if not has_data:
+        return y_top
+
+    # Layout: 4 filas × 2 columnas (cada campo = etiqueta + valor + detalle)
+    FONT_LBL  = 6.5
+    FONT_VAL  = 6.5
+    ROW_H     = 11
+    TITLE_H   = 18   # espacio total para la franja de título
+    PAD_TOP   = 4    # padding entre línea separadora y primera fila
+    n_pairs   = (len(fields) + 1) // 2
+    box_h     = TITLE_H + PAD_TOP + n_pairs * ROW_H + 6
+
+    if y_top - box_h < min_y + 6:
+        return y_top
+
+    y_top -= 6  # separación respecto al bloque anterior
+
+    # ── Fondo azul muy suave ──
+    c.saveState()
+    c.setFillColor(colors.Color(0.95, 0.97, 1.0))
+    c.roundRect(x, y_top - box_h, w, box_h, 6, stroke=0, fill=1)
+    c.restoreState()
+    _box_stroked(c, x, y_top, w, box_h, radius=6,
+                 stroke_color=colors.Color(0.65, 0.75, 0.90), stroke_width=0.9)
+
+    # ── Franja de título ──
+    c.saveState()
+    c.setFillColor(colors.Color(0.88, 0.92, 0.98))
+    c.roundRect(x, y_top - TITLE_H, w, TITLE_H, 6, stroke=0, fill=1)
+    c.restoreState()
+
+    c.setFont("Helvetica-Bold", 7.5)
+    c.setFillColor(IHC_POSITIVE_BLUE)
+    c.drawString(x + 10, y_top - TITLE_H + 5, "Datos IHQ detallados (Patwin / IHQ)")
+
+    # ── Línea separadora ──
+    c.saveState()
+    c.setStrokeColor(colors.Color(0.65, 0.75, 0.90))
+    c.setLineWidth(0.5)
+    c.line(x + 6, y_top - TITLE_H, x + w - 6, y_top - TITLE_H)
+    c.restoreState()
+
+    # ── Geometría de columnas ──
+    half  = w / 2
+    # Columna izquierda
+    CL1   = x + 8           # etiqueta
+    CV1   = x + 82          # valor
+    CD1   = x + 130         # detalle
+    # Columna derecha
+    CL2   = x + half + 8
+    CV2   = x + half + 82
+    CD2   = x + half + 130
+
+    left_fields  = fields[0::2]
+    right_fields = fields[1::2]
+
+    yy = y_top - TITLE_H - PAD_TOP - ROW_H + 3
+
+    for i in range(n_pairs):
+        lf = left_fields[i]  if i < len(left_fields)  else None
+        rf = right_fields[i] if i < len(right_fields) else None
+
+        # Fondo alternante muy sutil
+        if i % 2 == 0:
+            c.saveState()
+            c.setFillColor(colors.Color(0.91, 0.94, 0.99))
+            c.rect(x + 2, yy - 2, w - 4, ROW_H, stroke=0, fill=1)
+            c.restoreState()
+
+        for (label, val, det), cl, cv, cd in [
+            (lf, CL1, CV1, CD1) if lf else (None, None, None, None),
+            (rf, CL2, CV2, CD2) if rf else (None, None, None, None),
+        ]:
+            if label is None:
+                continue
+            c.setFont("Helvetica-Bold", FONT_LBL)
+            c.setFillColor(colors.Color(0.25, 0.25, 0.25))
+            c.drawString(cl, yy, label)
+
+            c.setFont("Helvetica", FONT_VAL)
+            c.setFillColor(colors.black)
+            c.drawString(cv, yy, val)
+
+            if det:
+                c.setFont("Helvetica", FONT_VAL - 0.5)
+                c.setFillColor(colors.Color(0.40, 0.40, 0.40))
+                c.drawString(cd, yy, det)
+
+        yy -= ROW_H
+
+    return y_top - (box_h + 6)
+
 
 
 # =============================================================================
@@ -970,58 +1265,112 @@ def generar_informe_pdf_bytes(
     # -------------------------------------------------------------------------
     # CABECERA
     # -------------------------------------------------------------------------
+    header_top = y  # posición Y de la parte superior de la cabecera
+
     c.setFont("Helvetica-Bold", font_h1)
+    c.setFillColor(colors.Color(0.10, 0.10, 0.10))
     c.drawString(margin, y, _fmt(cfg_pdf.get("titulo_servicio"), "SERVICIO DE ANATOMÍA PATOLÓGICA – HUBU"))
-    y -= 16
+    y -= 15
 
     c.setFont("Helvetica-Bold", font_h2)
+    c.setFillColor(IHC_POSITIVE_BLUE)
     c.drawString(margin, y, _fmt(cfg_pdf.get("titulo_informe"), "INFORME INTEGRADO IHQ + MammaTyper®"))
-    y -= 10
+    y -= 8
 
-    # Logo arriba derecha (si existe)
+    # Logo institucional (derecha)
+    logo_h_used = 0
     if logo_path and os.path.exists(logo_path):
         try:
             img = ImageReader(logo_path)
             iw, ih = img.getSize()
             if ih:
-                scale = 28 / ih
+                scale = 30 / ih
                 lw = iw * scale
                 lh = ih * scale
+                logo_h_used = lh
                 c.drawImage(
                     img,
                     width - margin - lw,
-                    height - margin - lh + 6,
+                    height - margin - lh + 4,
                     width=lw,
                     height=lh,
                     mask="auto",
                 )
         except Exception:
-            # El informe debe generarse aunque el logo falle
             pass
 
-    y -= 12
+    # Logo MammaScope (izquierda del logo institucional, si existe)
+    mamma_logo_path = os.path.join(base_dir, "media", "logo.png")
+    if not os.path.exists(mamma_logo_path):
+        mamma_logo_path = os.path.join(base_dir, "logo.png")
+    if os.path.exists(mamma_logo_path):
+        try:
+            mimg = ImageReader(mamma_logo_path)
+            miw, mih = mimg.getSize()
+            if mih:
+                mscale = 22 / mih
+                mlw = miw * mscale
+                mlh = mih * mscale
+                # Logo MammaScope: escala más pequeña y posición fija a la izquierda,
+                # sin depender del ancho del logo institucional para evitar solapamientos.
+                mscale2 = 18 / mih   # más pequeño que antes
+                mlw2 = miw * mscale2
+                mlh2 = mih * mscale2
+                # Anclar a 160 pts desde el borde derecho: deja espacio amplio a Sacyl
+                mamma_x = width - margin - 160 - mlw2
+                c.drawImage(
+                    mimg,
+                    mamma_x,
+                    height - margin - mlh2 + 4,
+                    width=mlw2,
+                    height=mlh2,
+                    mask="auto",
+                )
+        except Exception:
+            pass
+
+    # Línea divisoria bajo la cabecera
+    y -= 4
+    c.saveState()
+    c.setStrokeColor(IHC_POSITIVE_BLUE)
+    c.setLineWidth(1.2)
+    c.line(margin, y, width - margin, y)
+    c.restoreState()
+    y -= 10
 
     # -------------------------------------------------------------------------
     # IDENTIFICACIÓN (opcional)
     # -------------------------------------------------------------------------
     if cfg_pdf.get("mostrar_identificacion", True):
         box_h = 54
-        _box_stroked(c, margin, y, width - 2 * margin, box_h, radius=8, stroke_color=BORDER_GEN, stroke_width=BORDER_W_THIN)
+        # Fondo gris muy suave para la caja de identificación
+        c.saveState()
+        c.setFillColor(colors.Color(0.97, 0.97, 0.97))
+        c.roundRect(margin, y - box_h, width - 2 * margin, box_h, 6, stroke=0, fill=1)
+        c.restoreState()
+        _box_stroked(c, margin, y, width - 2 * margin, box_h, radius=6,
+                     stroke_color=colors.Color(0.75, 0.75, 0.75), stroke_width=0.8)
         y_inside = y - 16
 
         c.setFont("Helvetica-Bold", font_small)
+        c.setFillColor(colors.Color(0.30, 0.30, 0.30))
         c.drawString(margin + 10, y_inside + 8, T("identificacion", "Identificación"))
         c.setFont("Helvetica", font_body)
+        c.setFillColor(colors.black)
 
         c.drawString(margin + 10, y_inside - 6, f"NHC: {nhc}")
         c.drawString(margin + 240, y_inside - 6, f"Sample ID: {sample_id}")
         c.drawString(margin + 10, y_inside - 20, f"Ronda: {ronda}   |   Celularidad: {celularidad}")
         c.drawString(margin + 10, y_inside - 34, f"Fecha IHQ (Excel): {fecha_excel}   |   Fecha informe MMT: {fecha_mmt}")
 
-        y -= (box_h + 14)
+        y -= (box_h + 10)
 
     # -------------------------------------------------------------------------
     # PANEL INTEGRADO (recomendado)
+    # Controlado por cfg_pdf["mostrar_panel_integrado"] Y
+    # cfg_pdf["mostrar_resumen_cutoffs"] desde el panel de ajustes.
+    # Si mostrar_resumen_cutoffs=False se omite la columna de cutoffs/delta/equiv
+    # pasándolo como parámetro a la función.
     # -------------------------------------------------------------------------
     if cfg_pdf.get("mostrar_panel_integrado", True):
         y = _draw_panel_resumen_integrado(
@@ -1031,6 +1380,7 @@ def generar_informe_pdf_bytes(
             w=(width - 2 * margin),
             muestra=muestra,
             settings_mmt=cfg_mmt,
+            mostrar_cutoffs=bool(cfg_pdf.get("mostrar_resumen_cutoffs", True)),
         )
     else:
         # Fallback: tabla simple de genes si alguien desactiva el panel
@@ -1062,10 +1412,18 @@ def generar_informe_pdf_bytes(
     # MAPAS TIPO MammaTyper (barras con gradiente + thresholds + valor)
     # -------------------------------------------------------------------------
     if cfg_pdf.get("mostrar_mapas_calor", True):
+        y -= 4  # respiración extra antes de los mapas
         c.setFont("Helvetica-Bold", font_small)
-        c.setFillColor(colors.black)
-        c.drawString(margin, y, T("mapas_calor", "Mapas de calor (MammaTyper®) – Rojo: Valor. Negro: Límites"))
-        y -= 12
+        c.setFillColor(colors.Color(0.25, 0.25, 0.25))
+        c.drawString(margin, y,
+                     T("mapas_calor", "Mapas de calor MammaTyper®  ·  ▌ Valor medido   ▎ Umbrales"))
+        # Línea fina bajo el título de sección para separar visualmente
+        c.saveState()
+        c.setStrokeColor(colors.Color(0.80, 0.80, 0.80))
+        c.setLineWidth(0.4)
+        c.line(margin, y - 3, width - margin, y - 3)
+        c.restoreState()
+        y -= 10
 
         # Barra más ancha (menor margen lateral)
         x_bar = MARGIN_WIDE_MAPS
@@ -1203,6 +1561,14 @@ def generar_informe_pdf_bytes(
                 font_small=font_small,
                 max_lines=max_lines_aviso,
             )
+
+    # -------------------------------------------------------------------------
+    # TABLA IHQ DETALLADA (si hay espacio, datos y el setting lo permite)
+    # Controlada por cfg_pdf["mostrar_ihq_her2"] desde el panel de ajustes.
+    # -------------------------------------------------------------------------
+    if cfg_pdf.get("mostrar_ihq_her2", True):
+        y = _draw_ihq_detalle(c, margin, y, width - 2 * margin, muestra,
+                              min_y_allowed, font_small, font_body)
 
     # -------------------------------------------------------------------------
     # PIE DE PÁGINA (siempre)

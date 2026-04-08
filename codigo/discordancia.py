@@ -283,12 +283,6 @@ def _subtipo_bucket(s: Any) -> Optional[str]:
     return "otro"
 
 
-# Import duplicado en tu fragmento original:
-# from typing import Mapping, Any, Optional, List
-# from ajustes import load_settings
-#
-# No es necesario repetirlo. No rompe el código, pero ensucia el módulo.
-# Si quieres, elimínalo para dejarlo más limpio.
 
 
 def construir_aviso_rico(m: Mapping[str, Any]) -> Optional[str]:
@@ -309,7 +303,13 @@ def construir_aviso_rico(m: Mapping[str, Any]) -> Optional[str]:
     - El comportamiento es configurable desde settings (activar/desactivar tipos de avisos
       y umbrales de cercanía).
     """
-    cfg = load_settings().get("clinico", {}).get("avisos", {})
+    cfg_cli  = load_settings().get("clinico", {})
+    cfg      = cfg_cli.get("avisos", {})
+
+    # Umbrales clínicos configurables (con fallback a valores por defecto)
+    ki67_cutoff = float(cfg_cli.get("ki67_cutoff_ihq", 20.0))
+    pr_bajo_pct = float(cfg_cli.get("pr_bajo_pct",     10.0))
+    er_bajo_pct = float(cfg_cli.get("er_bajo_pct",     10.0))
 
     # Si los avisos están desactivados por configuración, no se genera nada.
     if not bool(cfg.get("activar", True)):
@@ -381,12 +381,20 @@ def construir_aviso_rico(m: Mapping[str, Any]) -> Optional[str]:
         )
 
     # PR bajo (IHQ) con interpretación positiva: alerta de “low”
-    if f_pr and pr_pct is not None and pr_pct < 10 and pr_ihq is True:
-        bullets.append(f"PR bajo por IHQ: {int(round(pr_pct))}% (interpretación dependiente del contexto).")
+    # Umbral configurable desde ajustes → Clínico → "Umbral PR bajo".
+    if f_pr and pr_pct is not None and pr_pct < pr_bajo_pct and pr_ihq is True:
+        bullets.append(
+            f"PR bajo por IHQ: {int(round(pr_pct))}% "
+            f"(umbral servicio: {int(pr_bajo_pct)}%; interpretación dependiente del contexto)."
+        )
 
     # ER bajo (IHQ) con interpretación positiva: alerta de “low”
-    if f_er_low and er_pct is not None and er_pct < 10 and er_ihq is True:
-        bullets.append(f"ER bajo por IHQ: {int(round(er_pct))}% (zona 'low positive'; interpretar con cautela).")
+    # Umbral configurable desde ajustes → Clínico → "Umbral ER bajo".
+    if f_er_low and er_pct is not None and er_pct < er_bajo_pct and er_ihq is True:
+        bullets.append(
+            f"ER bajo por IHQ: {int(round(er_pct))}% "
+            f"(umbral servicio: {int(er_bajo_pct)}%; zona 'low positive'; interpretar con cautela)."
+        )
 
     # -------------------------
     # 2) Ki-67: discordancia simple IHQ vs MMT en extremos
@@ -396,17 +404,20 @@ def construir_aviso_rico(m: Mapping[str, Any]) -> Optional[str]:
 
     alerta_ki67 = False
     if (ki67_ihq is not None) and (ki67_mmt is not None):
-        # Reglas conservadoras: solo se avisa en extremos (≤10% o ≥30%)
-        if ki67_ihq <= 10 and ki67_mmt is True:
+        # Umbral Ki-67 configurable desde ajustes → Clínico → "Cutoff Ki-67 IHQ".
+        # Bajo: mitad del cutoff. Alto: cutoff + 10 pts (margen conservador).
+        ki67_bajo   = ki67_cutoff / 2.0
+        ki67_alto   = ki67_cutoff + 10.0
+        if ki67_ihq <= ki67_bajo and ki67_mmt is True:
             alerta_ki67 = True
             bullets.append(
-                f"Posible discordancia proliferación: Ki-67 IHQ={ki67_ihq}% (bajo) vs "
+                f"Posible discordancia proliferación: Ki-67 IHQ={ki67_ihq}% (bajo, cutoff={int(ki67_cutoff)}%) vs "
                 f"MMT(MKI67)={_fmt(m.get('MKI67_status'))} (valor={_fmt(m.get('MKI67_value'))}). Requiere revisión."
             )
-        if ki67_ihq >= 30 and ki67_mmt is False:
+        if ki67_ihq >= ki67_alto and ki67_mmt is False:
             alerta_ki67 = True
             bullets.append(
-                f"Posible discordancia proliferación: Ki-67 IHQ={ki67_ihq}% (alto) vs "
+                f"Posible discordancia proliferación: Ki-67 IHQ={ki67_ihq}% (alto, cutoff={int(ki67_cutoff)}%) vs "
                 f"MMT(MKI67)={_fmt(m.get('MKI67_status'))} (valor={_fmt(m.get('MKI67_value'))}). Requiere revisión."
             )
 
@@ -503,9 +514,9 @@ def construir_aviso_rico(m: Mapping[str, Any]) -> Optional[str]:
         prios: List[str] = []
         if _tiene_contexto_her2_importante():
             prios.append("ERBB2")
-        if _tiene_discordancia_er() or (f_er_low and er_pct is not None and er_pct < 10 and er_ihq is True):
+        if _tiene_discordancia_er() or (f_er_low and er_pct is not None and er_pct < er_bajo_pct and er_ihq is True):
             prios.append("ESR1")
-        if _tiene_discordancia_pr() or (pr_pct is not None and pr_pct < 10 and pr_ihq is True):
+        if _tiene_discordancia_pr() or (pr_pct is not None and pr_pct < pr_bajo_pct and pr_ihq is True):
             prios.append("PGR")
         if alerta_ki67:
             prios.append("MKI67")
@@ -517,8 +528,8 @@ def construir_aviso_rico(m: Mapping[str, Any]) -> Optional[str]:
         or _tiene_discordancia_pr()
         or alerta_ki67
         or _tiene_contexto_her2_importante()
-        or (f_er_low and er_pct is not None and er_pct < 10 and er_ihq is True)
-        or (pr_pct is not None and pr_pct < 10 and pr_ihq is True)
+        or (f_er_low and er_pct is not None and er_pct < er_bajo_pct and er_ihq is True)
+        or (pr_pct is not None and pr_pct < pr_bajo_pct and pr_ihq is True)
     )
 
     # -------------------------
@@ -606,7 +617,22 @@ def construir_aviso_rico(m: Mapping[str, Any]) -> Optional[str]:
             )
 
     # -------------------------
-    # 6) Datos incompletos (solo si no hay otros avisos)
+    # 6) Celularidad baja
+    # -------------------------
+    # Si la celularidad tumoral es muy baja, los resultados IHQ pueden ser
+    # poco representativos. Se avisa al facultativo para que lo considere.
+    celularidad = _to_float(m.get("celularidad"))
+    umbral_celularidad = float(cfg_cli.get("celularidad_minima_pct", 20.0))
+    if celularidad is not None and celularidad < umbral_celularidad:
+        bullets.append(
+            f"Celularidad tumoral baja: {int(round(celularidad))}% "
+            f"(umbral mínimo recomendado: {int(umbral_celularidad)}%). "
+            "Los resultados IHQ y MMT pueden ser menos representativos. "
+            "Revisar con el caso original."
+        )
+
+    # -------------------------
+    # 7) Datos incompletos
     # -------------------------
     # Idea: si hay “algo” de IHQ y “algo” de MMT, pero faltan demasiados campos clave,
     # se avisa para no interpretar un resultado parcial.
@@ -623,7 +649,7 @@ def construir_aviso_rico(m: Mapping[str, Any]) -> Optional[str]:
         not _na(m.get("ERBB2_value")), not _na(m.get("MKI67_value")),
     ])
 
-    if f_faltan and (hay_ihq and hay_mmt) and (len(bullets) == 0):
+    if f_faltan and (hay_ihq and hay_mmt):
         faltan = []
         if _is_pos(m.get("ESR1_IHQ")) is None: faltan.append("ER(IHQ)")
         if _is_pos(m.get("PGR_IHQ")) is None: faltan.append("PR(IHQ)")
@@ -636,13 +662,17 @@ def construir_aviso_rico(m: Mapping[str, Any]) -> Optional[str]:
         if _extract_ihq_score(m.get("HER2_IHQ_score")) is None and _na(m.get("HER2_SISH_result")) and _na(m.get("HER2_final")):
             faltan.append("HER2(IHQ/SISH)")
 
-        # Umbral simple: si faltan demasiados campos, el caso se marca como incompleto.
+        # Se avisa siempre que falten demasiados campos, incluso si ya hay otros avisos.
+        # Importante: una discordancia basada en datos parciales puede ser artefactual.
         if len(faltan) >= 5:
-            bullets.append("Datos incompletos: faltan/NC " + ", ".join(faltan) + ".")
+            msg = "Datos incompletos: faltan/NC " + ", ".join(faltan) + "."
+            if bullets:
+                msg += " Los avisos anteriores deben interpretarse con cautela por datos parciales."
+            bullets.append(msg)
             incompleto = True
 
     # -------------------------
-    # 7) Coherencias internas mínimas (solo si el caso no se marcó como incompleto)
+    # 8) Coherencias internas mínimas (solo si el caso no se marcó como incompleto)
     # -------------------------
     # Si IHQ es positivo pero falta el porcentaje, se avisa porque puede ser relevante
     # para interpretar “low positive”.

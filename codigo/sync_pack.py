@@ -35,7 +35,7 @@ import json
 import zipfile
 import hashlib
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from db import init_db, get_connection, insertar_muestra_combinada
 
@@ -98,8 +98,8 @@ def merge_insert_only(muestra: Dict[str, Any]) -> str:
 
 def build_transfer_zip(
     lote: List[Dict[str, Any]],
-    meta: Dict[str, Any] | None = None,
-    extra_files: Dict[str, bytes] | None = None,
+    meta: Optional[Dict[str, Any]] = None,
+    extra_files: Optional[Dict[str, bytes]] = None,
 ) -> bytes:
     """
     Construye un paquete ZIP con:
@@ -111,9 +111,9 @@ def build_transfer_zip(
     ----------
     lote : list[dict]
         Lista de muestras (dict). Debe ser no vacía.
-    meta : dict | None
+    meta : Optional[Dict[str, Any]]
         Metadatos opcionales (ej: origen, hospital, versión app, notas).
-    extra_files : dict[str, bytes] | None
+    extra_files : Optional[Dict[str, bytes]]
         Archivos extra a incluir dentro del ZIP. Clave=nombre archivo, valor=bytes.
 
     Retorna

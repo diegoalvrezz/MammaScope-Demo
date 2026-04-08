@@ -11,16 +11,14 @@ import zipfile
 
 # Imports del proyecto 
 from informes import generar_informe_pdf_bytes
-from discordancia import extraer_sample_ids_con_aviso
+from discordancia import extraer_sample_ids_con_aviso, construir_aviso_rico
 from stats_biomarcadores import build_stats_table_from_df
 
 from ajustes import load_settings
-from discordancia import construir_aviso_rico
 
-from db import DB_PATH
+from db import DB_PATH, log_action
 from sync_pack import build_transfer_zip
 from auth import current_user
-from db import log_action
 
 
 
@@ -233,14 +231,15 @@ def construir_excel_concordancia_dashboard(df_lote: pd.DataFrame) -> io.BytesIO:
     # - IHQ numérico binarizado con umbral 20%
     # - Comparado contra MKI67_status (MMT)
     def _ihq_bin_ki67_20(x):
-        """Binariza Ki-67 IHQ: >=20% -> 1, <20% -> 0, no interpretable -> None."""
+        """Binariza Ki-67 IHQ según cutoff configurable desde ajustes (default 20%)."""
+        _cutoff = float(load_settings().get("clinico", {}).get("ki67_cutoff_ihq", 20.0))
         try:
             if x is None:
                 return None
             if pd.isna(x):
                 return None
             v = float(x)
-            return 1 if v >= 20.0 else 0
+            return 1 if v >= _cutoff else 0
         except Exception:
             return None
 
@@ -300,10 +299,11 @@ def construir_excel_concordancia_dashboard(df_lote: pd.DataFrame) -> io.BytesIO:
     # - Se define SIEMPRE, para evitar errores si falla el cálculo
     # -------------------------------------------------------------------------
     try:
-        stats_lote = build_stats_table_from_df(df, ki67_cutoff_ihq=20.0)
+        ki67_cutoff_lote = float(
+            load_settings().get("clinico", {}).get("ki67_cutoff_ihq", 20.0)
+        )
+        stats_lote = build_stats_table_from_df(df, ki67_cutoff_ihq=ki67_cutoff_lote)
     except Exception as e:
-        # Nota: en tu código original se usa np.nan pero no se importa numpy.
-        # Si mantienes este bloque, añade: import numpy as np.
         stats_lote = pd.DataFrame([{
             "Biomarcador": "ERROR",
             "N": 0,
@@ -1104,7 +1104,7 @@ def mostrar_paso_3(ir_a_paso_callback):
                             <div class="tooltip-text">
                                 <strong>Interpretación de avisos automáticos</strong><br><br>
                                 • Discordancias: diferencias entre IHQ y MammaTyper.<br>
-                                • ER/PR low (IHQ): expresión &lt;10%.<br>
+                                • ER/PR low (IHQ): expresión por debajo del umbral configurado en Ajustes.<br>
                                 • HER2-low: IHQ 1+ o 2+ sin amplificación.<br>
                                 • HER2 2+/3+ sin SISH: pendiente de confirmación.<br>
                                 • MMT cercano a cutoff: ΔCt ≤ 0.50.<br>
@@ -1274,7 +1274,15 @@ def mostrar_paso_3(ir_a_paso_callback):
     with col_right:
         st.markdown("#### Informe de concordancia y análisis clínico")
 
-        buf = construir_excel_concordancia_dashboard(df_lote)
+        # Se calcula una sola vez y se guarda en session_state para reutilizarlo
+        # en el bloque ZIP (si incluir_excel_resumen_en_zip está activo).
+        # Así se evita generarlo dos veces en el mismo render.
+        if "buf_concordancia" not in st.session_state or \
+                st.session_state.get("buf_concordancia_lote_id") != id(ultimo_lote):
+            st.session_state["buf_concordancia"] = construir_excel_concordancia_dashboard(df_lote)
+            st.session_state["buf_concordancia_lote_id"] = id(ultimo_lote)
+        buf = st.session_state["buf_concordancia"]
+
         st.download_button(
             label="Descargar Excel concordancia + dashboard",
             data=buf,
@@ -1376,8 +1384,17 @@ def mostrar_paso_3(ir_a_paso_callback):
     # Si se activa en settings, se incluye dentro del ZIP un Excel resumen del lote
     if settings.get("exportacion", {}).get("incluir_excel_resumen_en_zip", False):
         try:
-            excel_buf = construir_excel_concordancia_dashboard(pd.DataFrame(st.session_state["ultimo_lote"]))
-            extra["lote_resultados.xlsx"] = excel_buf.getvalue()
+            # Reutilizar el buffer ya calculado en el bloque de descarga, si existe.
+            # Evita regenerar el Excel completo una segunda vez en el mismo render.
+            buf_cached = st.session_state.get("buf_concordancia")
+            if buf_cached is not None:
+                buf_cached.seek(0)
+                extra["lote_resultados.xlsx"] = buf_cached.read()
+            else:
+                excel_buf = construir_excel_concordancia_dashboard(
+                    pd.DataFrame(st.session_state["ultimo_lote"])
+                )
+                extra["lote_resultados.xlsx"] = excel_buf.getvalue()
         except Exception:
             # Si falla, se exporta igualmente el ZIP sin el Excel extra
             pass
