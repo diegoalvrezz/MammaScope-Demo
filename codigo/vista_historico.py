@@ -599,7 +599,11 @@ def construir_excel_concordancia_dashboard(df_lote: pd.DataFrame) -> io.BytesIO:
             # Filas
             for i, (_, row) in enumerate(top_rev[cols_top].iterrows(), start=top_r + 2):
                 for j, col in enumerate(cols_top):
-                    ws2.write(i, j, row.get(col, ""))
+                    val = row.get(col, "")
+                    # Sanitizar NaN/inf: XlsxWriter los convierte a #NUM! con nan_inf_to_errors=True
+                    if isinstance(val, float) and (pd.isna(val) or val != val):
+                        val = ""
+                    ws2.write(i, j, val)
 
         # Ajustes de anchos del dashboard
         ws2.set_column(0, 0, 18)
