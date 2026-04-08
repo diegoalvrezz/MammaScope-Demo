@@ -474,16 +474,16 @@ def build_stats_table_from_df(
                 "Biomarcador": name,
                 "N": 0,
                 "TP": 0, "TN": 0, "FP": 0, "FN": 0,
-                "%Concord": np.nan,
-                "Kappa": np.nan,
-                "Kappa_IC95_inf": np.nan,
-                "Kappa_IC95_sup": np.nan,
-                "McNemar_p": np.nan,
-                "Sensibilidad": np.nan,
-                "Especificidad": np.nan,
-                "VPP": np.nan,
-                "VPN": np.nan,
-                "OR_diagnostico": np.nan,
+                "%Concord": None,
+                "Kappa": None,
+                "Kappa_IC95_inf": None,
+                "Kappa_IC95_sup": None,
+                "McNemar_p": None,
+                "Sensibilidad": None,
+                "Especificidad": None,
+                "VPP": None,
+                "VPN": None,
+                "OR_diagnostico": None,
                 "b(IHQ+->MMT-)": 0,
                 "c(IHQ-->MMT+)": 0,
                 "Tendencia": "Sin datos",
@@ -518,7 +518,14 @@ def build_stats_table_from_df(
         )
 
         def _r(v, dec=4):
-            return round(v, dec) if not math.isnan(v) else np.nan
+            # Devuelve None (celda vacía en Excel) en lugar de np.nan o inf,
+            # evitando que XlsxWriter los escriba como #NUM! con nan_inf_to_errors=True.
+            try:
+                if math.isnan(v) or math.isinf(v):
+                    return None
+                return round(v, dec)
+            except (TypeError, ValueError):
+                return None
 
         rows.append({
             "Biomarcador": name,
@@ -543,4 +550,8 @@ def build_stats_table_from_df(
             "Aviso_N": aviso_n,
         })
 
-    return pd.DataFrame(rows)
+    df_out = pd.DataFrame(rows)
+    # Pandas convierte None a NaN en columnas float64, lo que XlsxWriter escribe
+    # como #NUM! cuando nan_inf_to_errors=True esta activo. Forzamos dtype object
+    # para preservar None como celda vacia en Excel.
+    return df_out.astype(object).where(pd.notnull(df_out), None)
