@@ -1747,7 +1747,24 @@ def generar_informe_pdf_bytes(
             )
 
     # -------------------------------------------------------------------------
-    # AVISOS (si hay espacio)
+    # TABLA DE CONCORDANCIAS IHQ vs MMT
+    # Aparece antes que los avisos: es información objetiva y estructurada.
+    # Controlable desde Ajustes → PDF.
+    # -------------------------------------------------------------------------
+    if cfg_pdf.get("mostrar_concordancia_ihq_mmt", True):
+        ki67_cutoff_inf = float(cfg_cli.get("ki67_cutoff_ihq", 20.0))
+        y = _draw_concordancia_box(
+            c=c,
+            x=margin,
+            y_top=y,
+            w=(width - 2 * margin),
+            muestra=muestra,
+            min_y=min_y_allowed,
+            ki67_cutoff=ki67_cutoff_inf,
+        )
+
+    # -------------------------------------------------------------------------
+    # AVISOS (si hay espacio, tras la concordancia)
     # -------------------------------------------------------------------------
     aviso_txt = _fmt(muestra.get("aviso"), "")
     incluir_avisos = bool(cfg_avisos.get("activar", True) and cfg_avisos.get("incluir_en_pdf", True))
@@ -1768,23 +1785,6 @@ def generar_informe_pdf_bytes(
                 font_small=font_small,
                 max_lines=max_lines_aviso,
             )
-
-    # -------------------------------------------------------------------------
-    # TABLA DE CONCORDANCIAS IHQ vs MMT
-    # Siempre aparece en la misma página (espacio garantizado por reducción
-    # del padding en bloques anteriores). Controlable desde Ajustes → PDF.
-    # -------------------------------------------------------------------------
-    if cfg_pdf.get("mostrar_concordancia_ihq_mmt", True):
-        ki67_cutoff_inf = float(cfg_cli.get("ki67_cutoff_ihq", 20.0))
-        y = _draw_concordancia_box(
-            c=c,
-            x=margin,
-            y_top=y,
-            w=(width - 2 * margin),
-            muestra=muestra,
-            min_y=min_y_allowed,
-            ki67_cutoff=ki67_cutoff_inf,
-        )
 
     # -------------------------------------------------------------------------
     # TABLA IHQ DETALLADA (si hay espacio, datos y el setting lo permite)
