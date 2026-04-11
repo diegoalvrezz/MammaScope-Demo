@@ -554,21 +554,36 @@ def _extraer_biomarcador(texto: str, nombre: str) -> Tuple[Optional[float], Opti
     Ejemplo típico:
         ESR1 38.2 Positive
 
+    Problema conocido en PDFs reales de MammaTyper:
+        El gen aparece también en la tabla de controles ("HEX ESR1\n2\nFAM"),
+        lo que hace que re.search() capture esa ocurrencia antes que la de
+        resultados (p.ej. "ESR1\n2\nFAM" -> valor=2, estado=FAM).
+        Se resuelve iterando TODAS las ocurrencias y eligiendo la que tenga
+        un valor de Ct válido (15-50) y un estado reconocible.
+
     Retorna (None, None) si no se encuentra.
     """
     patron = rf"{nombre}\s+([\d\.,]+)\s+(\w+)"
-    m = re.search(patron, texto)
-    if not m:
-        return None, None
+    estados_validos = {"positive", "negative", "low", "zero", "ultralow"}
 
-    valor_str = m.group(1).replace(",", ".")
-    try:
-        valor = float(valor_str)
-    except ValueError:
-        valor = None
+    for m in re.finditer(patron, texto):
+        valor_str = m.group(1).replace(",", ".")
+        estado = m.group(2)
+        try:
+            valor = float(valor_str)
+        except ValueError:
+            continue
 
-    estado = m.group(2)
-    return valor, estado
+        # Descartar valores fuera del rango fisiológico de Ct
+        if not (15.0 <= valor <= 50.0):
+            continue
+        # Descartar estados que no son resultados MMT (p.ej. "FAM", "HEX", "B2M")
+        if not any(s in estado.lower() for s in estados_validos):
+            continue
+
+        return valor, estado
+
+    return None, None
 
 
 def _extraer_registro_pagina(texto: str) -> Optional[Dict[str, Any]]:
