@@ -130,6 +130,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "mostrar_vista_rapida": True,
         "mostrar_tabla_genes": True,
         "mostrar_ihq_her2": True,
+        "mostrar_concordancia_ihq_mmt": True,
         "mostrar_footer_firmantes": True,
 
 
@@ -444,6 +445,7 @@ def validate_settings(settings: Dict[str, Any], autocorrect: bool = True) -> Tup
         "mostrar_vista_rapida",
         "mostrar_tabla_genes",
         "mostrar_ihq_her2",
+        "mostrar_concordancia_ihq_mmt",
         "mostrar_footer_firmantes",
         "mostrar_resumen_cutoffs",
         "mostrar_visual_cutoffs",
@@ -1284,6 +1286,16 @@ def mostrar_ajustes():
                     "Sección HER2 por IHQ",
                     value=bool(pdf.get("mostrar_ihq_her2", True)),
                     help="Incluye el bloque específico de HER2 por IHQ (si está disponible en los datos).",
+                )
+                pdf["mostrar_concordancia_ihq_mmt"] = st.checkbox(
+                    "Tabla de concordancia IHQ vs MMT",
+                    value=bool(pdf.get("mostrar_concordancia_ihq_mmt", True)),
+                    help=(
+                        "Añade una tabla que compara directamente los resultados IHQ e MMT "
+                        "para cada biomarcador, indicando si hay concordancia o discordancia. "
+                        "Se considera esencial para el informe clínico — si no cabe en la página, "
+                        "se genera en una segunda página automáticamente."
+                    ),
                 )
                 pdf["mostrar_comentario_automatico"] = st.checkbox(
                     "Comentario automático",

@@ -748,7 +748,7 @@ def _draw_panel_resumen_integrado(
     title_h = 20   # más espacio para el título
     header_h = 12
     row_h = 12
-    box_h = title_h + header_h + len(genes) * row_h + 16
+    box_h = title_h + header_h + len(genes) * row_h + 8  # reducido de 16→8: elimina espacio vacío inferior
 
     # Borde azul oscuro para el panel integrado (neutro, clínico)
     _box_stroked(c, x, y_top, w, box_h, radius=6,
@@ -834,7 +834,7 @@ def _draw_panel_resumen_integrado(
 
         y -= row_h
 
-    return y_top - (box_h + 14)
+    return y_top - (box_h + 6)  # reducido de 14→6: menos espacio muerto tras el panel
 
 
 # =============================================================================
@@ -947,7 +947,7 @@ def _draw_mmt_proximity_visual(
     c.setFillColor(colors.grey)
     c.drawString(x + 10, y_text - 9, expl_lines[1])
 
-    return y_top - (box_h + 14)
+    return y_top - (box_h + 6)  # reducido 14→6: menos hueco tras proximidad cutoffs
 
 
 # =============================================================================
@@ -1017,6 +1017,192 @@ def _draw_aviso_box(
     return y_top - (box_h + 12)
 
 
+
+# =============================================================================
+# TABLA DE CONCORDANCIAS IHQ vs MMT
+# =============================================================================
+
+def _draw_concordancia_box(
+    c: canvas.Canvas,
+    x: float,
+    y_top: float,
+    w: float,
+    muestra: Mapping[str, Any],
+    min_y: float,
+    ki67_cutoff: float = 20.0,
+) -> float:
+    """
+    Dibuja un bloque compacto de concordancia IHQ vs MMT para los 4 biomarcadores.
+
+    Para cada gen muestra:
+      - Resultado IHQ (texto)
+      - Resultado MMT (status)
+      - Etiqueta: OK / DISCORDANTE / Sin dato(s)
+
+    Altura estimada: ~75 pts. Solo se dibuja si hay espacio.
+    """
+    import math
+
+    def _es_na_local(v):
+        if v is None: return True
+        if isinstance(v, float) and math.isnan(v): return True
+        if isinstance(v, str) and v.strip() in ("", "No consta", "NC"): return True
+        return False
+
+    def _ihq_bin_hr(s):
+        if _es_na_local(s): return None
+        t = str(s).lower()
+        if "pos" in t: return True
+        if "neg" in t: return False
+        return None
+
+    def _mmt_bin_status(s):
+        if _es_na_local(s): return None
+        t = str(s).lower()
+        if "pos" in t: return True
+        if "neg" in t or "low" in t or "zero" in t or "ultra" in t: return False
+        return None
+
+    def _ihq_bin_ki67(v):
+        try:
+            if _es_na_local(v): return None
+            return float(str(v).replace(",", ".")) >= ki67_cutoff
+        except Exception:
+            return None
+
+    def _concordancia(a, b):
+        if a is None or b is None: return "Sin dato(s)", None
+        return ("OK" if a == b else "DISCORDANTE"), (a == b)
+
+    # Calcular concordancias
+    rows = [
+        (
+            "ER (ESR1)",
+            _fmt(muestra.get("ESR1_IHQ"), "NC"),
+            _fmt(muestra.get("ESR1_status"), "NC"),
+            *_concordancia(_ihq_bin_hr(muestra.get("ESR1_IHQ")),
+                           _mmt_bin_status(muestra.get("ESR1_status"))),
+        ),
+        (
+            "PR (PGR)",
+            _fmt(muestra.get("PGR_IHQ"), "NC"),
+            _fmt(muestra.get("PGR_status"), "NC"),
+            *_concordancia(_ihq_bin_hr(muestra.get("PGR_IHQ")),
+                           _mmt_bin_status(muestra.get("PGR_status"))),
+        ),
+        (
+            "HER2 (ERBB2)",
+            _fmt(muestra.get("HER2_final"), "NC"),
+            _fmt(muestra.get("ERBB2_status"), "NC"),
+            *_concordancia(
+                (lambda s: False if _es_na_local(s) else
+                    (True if any(k in str(s).lower() for k in ("positiv","ampl","3+"))
+                     else (False if any(k in str(s).lower() for k in ("neg","low","zero","ultra")) else None))
+                )(muestra.get("HER2_final")),
+                _mmt_bin_status(muestra.get("ERBB2_status")),
+            ),
+        ),
+        (
+            "Ki-67 (MKI67)",
+            _fmt(muestra.get("KI67_IHQ"), "NC") + ("%" if not _es_na_local(muestra.get("KI67_IHQ")) else ""),
+            _fmt(muestra.get("MKI67_status"), "NC"),
+            *_concordancia(_ihq_bin_ki67(muestra.get("KI67_IHQ")),
+                           _mmt_bin_status(muestra.get("MKI67_status"))),
+        ),
+    ]
+
+    # Altura
+    # box_h debe incluir: título + separador cabecera (5pts) + filas + padding inferior
+    TITLE_H = 16
+    ROW_H   = 13
+    PAD     = 4
+    HDR_H   = 5   # altura cabecera columnas + línea separadora
+    box_h   = TITLE_H + HDR_H + PAD + len(rows) * ROW_H + 14
+
+    if y_top - box_h < min_y + 6:
+        return y_top
+
+    y_top -= 6
+
+    # Fondo
+    c.saveState()
+    c.setFillColor(colors.Color(0.97, 0.98, 1.0))
+    c.roundRect(x, y_top - box_h, w, box_h, 6, stroke=0, fill=1)
+    c.restoreState()
+    _box_stroked(c, x, y_top, w, box_h, radius=6,
+                 stroke_color=colors.Color(0.55, 0.70, 0.90), stroke_width=0.9)
+
+    # Título
+    c.saveState()
+    c.setFillColor(colors.Color(0.85, 0.91, 0.98))
+    c.roundRect(x, y_top - TITLE_H, w, TITLE_H, 6, stroke=0, fill=1)
+    c.restoreState()
+    c.setFont("Helvetica-Bold", 7.5)
+    c.setFillColor(IHC_POSITIVE_BLUE)
+    c.drawString(x + 10, y_top - TITLE_H + 4, "Concordancia IHQ vs MammaTyper®")
+
+    # Cabecera columnas — espacios ajustados para texto real sin truncado
+    FONT_HDR = 6.0
+    FONT_ROW = 6.5
+    COL_GEN  = x + 8
+    COL_IHQ  = x + 90
+    COL_MMT  = x + 185
+    COL_RES  = x + 275
+
+    yy = y_top - TITLE_H - PAD - 2
+    c.setFont("Helvetica-Bold", FONT_HDR)
+    c.setFillColor(colors.Color(0.40, 0.40, 0.40))
+    c.drawString(COL_GEN, yy, "Biomarcador")
+    c.drawString(COL_IHQ, yy, "IHQ")
+    c.drawString(COL_MMT, yy, "MammaTyper®")
+    c.drawString(COL_RES, yy, "Concordancia")
+    yy -= 3
+    # Línea separadora cabecera
+    c.saveState()
+    c.setStrokeColor(colors.Color(0.70, 0.80, 0.92))
+    c.setLineWidth(0.4)
+    c.line(x + 6, yy, x + w - 6, yy)
+    c.restoreState()
+    yy -= 2
+
+    # Filas
+    for i, (gen, ihq_txt, mmt_txt, label, ok) in enumerate(rows):
+        yy -= ROW_H
+
+        # Fondo alternante
+        if i % 2 == 0:
+            c.saveState()
+            c.setFillColor(colors.Color(0.92, 0.95, 0.99))
+            c.rect(x + 2, yy - 2, w - 4, ROW_H, stroke=0, fill=1)
+            c.restoreState()
+
+        # Gen
+        c.setFont("Helvetica-Bold", FONT_ROW)
+        c.setFillColor(colors.Color(0.20, 0.20, 0.20))
+        c.drawString(COL_GEN, yy, gen)
+
+        # IHQ
+        c.setFont("Helvetica", FONT_ROW)
+        c.setFillColor(colors.black)
+        c.drawString(COL_IHQ, yy, ihq_txt[:28])
+
+        # MMT
+        c.drawString(COL_MMT, yy, mmt_txt[:20])
+
+        # Resultado — color según concordancia
+        c.setFont("Helvetica-Bold", FONT_ROW)
+        if ok is True:
+            c.setFillColor(colors.Color(0.05, 0.55, 0.15))   # verde
+            c.drawString(COL_RES, yy, "✓  OK")
+        elif ok is False:
+            c.setFillColor(colors.Color(0.80, 0.10, 0.10))   # rojo
+            c.drawString(COL_RES, yy, "(!)  DISCORDANTE")
+        else:
+            c.setFillColor(colors.Color(0.50, 0.50, 0.50))   # gris
+            c.drawString(COL_RES, yy, "—  Sin dato(s)")
+
+    return y_top - (box_h + 6)
+
 # =============================================================================
 # TABLA IHQ DETALLADA (rellena el espacio libre con datos clínicos completos)
 # =============================================================================
@@ -1062,8 +1248,14 @@ def _draw_ihq_detalle(
                         _pct_str(muestra.get("P53_IHQ_pct"))),
         ("CK19 (IHQ)",  _fmt(muestra.get("CK19_IHQ_status"), "NC"), ""),
         ("Subtipo IHQ", _fmt(muestra.get("subtipo_ihq"), "NC"), ""),
-        ("Subtipo MMT", _fmt(muestra.get("subtipo_mmt"), "NC"),
-                        _fmt(muestra.get("subtipo_mmt_detalle"), "")),
+        # Subtipo MMT: combinamos subtipo + detalle en val para evitar pisado
+        # El detalle se añade entre paréntesis si existe
+        ("Subtipo MMT",
+         (lambda s, d: s if not d or d == "No consta" else f"{s}  {d}")(
+             _fmt(muestra.get("subtipo_mmt"), "NC"),
+             _fmt(muestra.get("subtipo_mmt_detalle"), ""),
+         ),
+         ""),
     ]
 
     # Sólo mostrar si hay al menos 1 campo útil (distinto de NC/vacío)
@@ -1115,14 +1307,18 @@ def _draw_ihq_detalle(
 
     # ── Geometría de columnas ──
     half  = w / 2
-    # Columna izquierda
-    CL1   = x + 8           # etiqueta
-    CV1   = x + 82          # valor
-    CD1   = x + 130         # detalle
-    # Columna derecha
+    # Columna izquierda: etiqueta | valor | detalle
+    CL1   = x + 8
+    CV1   = x + 72           # valor (más a la izquierda para dar más espacio)
+    CD1   = x + 138          # detalle
+    # Columna derecha: mismo esquema, acotado a la mitad
     CL2   = x + half + 8
-    CV2   = x + half + 82
-    CD2   = x + half + 130
+    CV2   = x + half + 72
+    CD2   = x + half + 138
+    # Ancho máximo disponible para valor en cada mitad
+    # Se amplía para que "Subtipo MMT" (texto largo) no se trunque
+    MAX_VAL_W  = (half - 60)   # ~110 pts: suficiente para subtipos largos
+    MAX_DET_W  = (half - 145)  # ~45 pts: detalle corto (ya no se usa para subtipo)
 
     left_fields  = fields[0::2]
     right_fields = fields[1::2]
@@ -1152,12 +1348,23 @@ def _draw_ihq_detalle(
 
             c.setFont("Helvetica", FONT_VAL)
             c.setFillColor(colors.black)
-            c.drawString(cv, yy, val)
+            # Truncar valor si excede el espacio disponible
+            val_disp = val
+            while val_disp and c.stringWidth(val_disp, "Helvetica", FONT_VAL) > MAX_VAL_W:
+                val_disp = val_disp[:-1]
+            if val_disp != val:
+                val_disp = val_disp[:-1] + "…"
+            c.drawString(cv, yy, val_disp)
 
             if det:
                 c.setFont("Helvetica", FONT_VAL - 0.5)
                 c.setFillColor(colors.Color(0.40, 0.40, 0.40))
-                c.drawString(cd, yy, det)
+                det_disp = det
+                while det_disp and c.stringWidth(det_disp, "Helvetica", FONT_VAL - 0.5) > MAX_DET_W:
+                    det_disp = det_disp[:-1]
+                if det_disp != det:
+                    det_disp = det_disp[:-1] + "…"
+                c.drawString(cd, yy, det_disp)
 
         yy -= ROW_H
 
@@ -1561,6 +1768,23 @@ def generar_informe_pdf_bytes(
                 font_small=font_small,
                 max_lines=max_lines_aviso,
             )
+
+    # -------------------------------------------------------------------------
+    # TABLA DE CONCORDANCIAS IHQ vs MMT
+    # Siempre aparece en la misma página (espacio garantizado por reducción
+    # del padding en bloques anteriores). Controlable desde Ajustes → PDF.
+    # -------------------------------------------------------------------------
+    if cfg_pdf.get("mostrar_concordancia_ihq_mmt", True):
+        ki67_cutoff_inf = float(cfg_cli.get("ki67_cutoff_ihq", 20.0))
+        y = _draw_concordancia_box(
+            c=c,
+            x=margin,
+            y_top=y,
+            w=(width - 2 * margin),
+            muestra=muestra,
+            min_y=min_y_allowed,
+            ki67_cutoff=ki67_cutoff_inf,
+        )
 
     # -------------------------------------------------------------------------
     # TABLA IHQ DETALLADA (si hay espacio, datos y el setting lo permite)
